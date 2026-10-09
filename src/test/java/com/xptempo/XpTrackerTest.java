@@ -1,6 +1,6 @@
-package com.xpulse;
+package com.xptempo;
 
-import com.xpulse.tracker.XpTracker;
+import com.xptempo.tracker.XpTracker;
 import java.util.List;
 import net.runelite.api.Skill;
 import org.junit.Test;

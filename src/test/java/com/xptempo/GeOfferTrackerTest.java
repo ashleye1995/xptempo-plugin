@@ -1,7 +1,7 @@
-package com.xpulse;
+package com.xptempo;
 
-import com.xpulse.tracker.GeOfferTracker;
-import com.xpulse.tracker.GeOfferTracker.SavedOffer;
+import com.xptempo.tracker.GeOfferTracker;
+import com.xptempo.tracker.GeOfferTracker.SavedOffer;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;

@@ -1,4 +1,4 @@
-package com.xpulse.api;
+package com.xptempo.api;
 
 import java.util.List;
 import java.util.Map;

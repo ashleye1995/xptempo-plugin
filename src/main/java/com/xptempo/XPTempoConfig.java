@@ -1,14 +1,14 @@
-package com.xpulse;
+package com.xptempo;
 
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
 
-@ConfigGroup(XPulseConfig.GROUP)
-public interface XPulseConfig extends Config
+@ConfigGroup(XPTempoConfig.GROUP)
+public interface XPTempoConfig extends Config
 {
-	String GROUP = "xpulse";
+	String GROUP = "xptempo";
 	String KEY_ENABLED = "enabled";
 	String KEY_PAIRING_CODE = "pairingCode";
 	String KEY_API_KEY = "apiKey";
@@ -16,9 +16,9 @@ public interface XPulseConfig extends Config
 
 	@ConfigItem(
 		keyName = KEY_ENABLED,
-		name = "Send data to XPulse",
-		description = "Uploads your own character's skills and XP, activity and session time to your XPulse account. Nothing is sent until you pair.",
-		warning = "This sends your character's data (skills and XP, activity, session time; later bank, inventory and GE offers) and your IP address to XPulse's servers, which are not run or verified by RuneLite developers.",
+		name = "Send data to XPTempo",
+		description = "Uploads your own character's skills and XP, activity and session time to your XPTempo account. Nothing is sent until you pair.",
+		warning = "This sends your character's data (skills and XP, activity, session time; later bank, inventory and GE offers) and your IP address to XPTempo's servers, which are not run or verified by RuneLite developers.",
 		position = 0
 	)
 	default boolean enabled()
@@ -29,7 +29,7 @@ public interface XPulseConfig extends Config
 	@ConfigItem(
 		keyName = KEY_PAIRING_CODE,
 		name = "Pairing code",
-		description = "The 8-character code shown in the XPulse app. It is exchanged for an API key once, then cleared.",
+		description = "The 8-character code shown in the XPTempo app. It is exchanged for an API key once, then cleared.",
 		position = 1
 	)
 	default String pairingCode()
@@ -40,7 +40,7 @@ public interface XPulseConfig extends Config
 	@ConfigItem(
 		keyName = KEY_API_KEY,
 		name = "API key",
-		description = "Filled in automatically after pairing. Revoke it from the XPulse app if this computer is lost.",
+		description = "Filled in automatically after pairing. Revoke it from the XPTempo app if this computer is lost.",
 		secret = true,
 		position = 2
 	)
@@ -88,7 +88,7 @@ public interface XPulseConfig extends Config
 	@ConfigItem(
 		keyName = KEY_API_BASE_URL,
 		name = "API base URL",
-		description = "Where batches are sent. Only change this for a self-hosted XPulse API.",
+		description = "Where batches are sent. Only change this for a self-hosted XPTempo API.",
 		section = advanced,
 		position = 11
 	)

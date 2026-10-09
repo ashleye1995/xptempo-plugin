@@ -1,12 +1,12 @@
-package com.xpulse;
+package com.xptempo;
 
 import com.google.gson.Gson;
 import com.google.inject.Provides;
-import com.xpulse.api.Payloads;
-import com.xpulse.api.XPulseApi;
-import com.xpulse.tracker.ContainerTracker;
-import com.xpulse.tracker.GeOfferTracker;
-import com.xpulse.tracker.XpTracker;
+import com.xptempo.api.Payloads;
+import com.xptempo.api.XPTempoApi;
+import com.xptempo.tracker.ContainerTracker;
+import com.xptempo.tracker.GeOfferTracker;
+import com.xptempo.tracker.XpTracker;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -53,17 +53,17 @@ import net.runelite.client.plugins.PluginDescriptor;
 import okhttp3.OkHttpClient;
 
 /**
- * Sends the logged-in character's own data to the XPulse API: sessions, skills and XP deltas,
+ * Sends the logged-in character's own data to the XPTempo API: sessions, skills and XP deltas,
  * inventory/bank/equipment contents, GE offers, deaths and level-ups, plus an activity heartbeat.
  * Design notes: Vault/research/runelite-plugin.md.
  */
 @Slf4j
 @PluginDescriptor(
-	name = "XPulse",
-	description = "Companion plugin for the XPulse app: sends your own character's XP, wealth and activity to your XPulse account (opt-in)",
+	name = "XPTempo",
+	description = "Companion plugin for the XPTempo app: sends your own character's XP, wealth and activity to your XPTempo account (opt-in)",
 	tags = {"xp", "tracker", "stats", "companion", "progress"}
 )
-public class XPulsePlugin extends Plugin
+public class XPTempoPlugin extends Plugin
 {
 	static final String VERSION = "0.2.0";
 	/** StatChanged and GE bursts for two ticks after LOGGED_IN; XP and the display name are unreliable until then. */
@@ -84,7 +84,7 @@ public class XPulsePlugin extends Plugin
 	private ConfigManager configManager;
 
 	@Inject
-	private XPulseConfig config;
+	private XPTempoConfig config;
 
 	@Inject
 	private ItemManager itemManager;
@@ -98,7 +98,7 @@ public class XPulsePlugin extends Plugin
 	@Inject
 	private ScheduledExecutorService executor;
 
-	private XPulseApi api;
+	private XPTempoApi api;
 	private final XpTracker tracker = new XpTracker();
 	private final ContainerTracker containers = new ContainerTracker();
 	private GeOfferTracker geOffers;
@@ -125,9 +125,9 @@ public class XPulsePlugin extends Plugin
 	private volatile int bankMaxEverySeconds = 30;
 
 	@Provides
-	XPulseConfig provideConfig(ConfigManager configManager)
+	XPTempoConfig provideConfig(ConfigManager configManager)
 	{
-		return configManager.getConfig(XPulseConfig.class);
+		return configManager.getConfig(XPTempoConfig.class);
 	}
 
 	@Override
@@ -138,24 +138,24 @@ public class XPulsePlugin extends Plugin
 			@Override
 			public GeOfferTracker.SavedOffer load(int slot)
 			{
-				String json = configManager.getRSProfileConfiguration(XPulseConfig.GROUP, "geoffer." + slot);
+				String json = configManager.getRSProfileConfiguration(XPTempoConfig.GROUP, "geoffer." + slot);
 				return json == null || json.isEmpty() ? null : gson.fromJson(json, GeOfferTracker.SavedOffer.class);
 			}
 
 			@Override
 			public void save(int slot, GeOfferTracker.SavedOffer offer)
 			{
-				configManager.setRSProfileConfiguration(XPulseConfig.GROUP, "geoffer." + slot, gson.toJson(offer));
+				configManager.setRSProfileConfiguration(XPTempoConfig.GROUP, "geoffer." + slot, gson.toJson(offer));
 			}
 
 			@Override
 			public void clear(int slot)
 			{
-				configManager.unsetRSProfileConfiguration(XPulseConfig.GROUP, "geoffer." + slot);
+				configManager.unsetRSProfileConfiguration(XPTempoConfig.GROUP, "geoffer." + slot);
 			}
 		}, () -> UUID.randomUUID().toString());
 
-		api = new XPulseApi(okHttpClient, gson, executor, "XPulse/" + VERSION, new XPulseApi.Listener()
+		api = new XPTempoApi(okHttpClient, gson, executor, "XPTempo/" + VERSION, new XPTempoApi.Listener()
 		{
 			@Override
 			public void onAck(Payloads.Ack ack)
@@ -183,16 +183,16 @@ public class XPulsePlugin extends Plugin
 				{
 					for (Payloads.Rejection r : ack.rejected)
 					{
-						log.warn("XPulse: event {} rejected: {} {}", r.seq, r.code, r.message);
+						log.warn("XPTempo: event {} rejected: {} {}", r.seq, r.code, r.message);
 					}
 				}
-				log.debug("XPulse: batch {} accepted={} duplicates={}", ack.batchId, ack.accepted, ack.duplicates);
+				log.debug("XPTempo: batch {} accepted={} duplicates={}", ack.batchId, ack.accepted, ack.duplicates);
 			}
 
 			@Override
 			public void onUnauthorized()
 			{
-				chat("XPulse: your API key was rejected. Open the plugin settings and pair again.");
+				chat("XPTempo: your API key was rejected. Open the plugin settings and pair again.");
 			}
 
 			@Override
@@ -200,11 +200,11 @@ public class XPulsePlugin extends Plugin
 			{
 				if (willRetry)
 				{
-					log.debug("XPulse: {}", message);
+					log.debug("XPTempo: {}", message);
 				}
 				else
 				{
-					log.warn("XPulse: {}", message);
+					log.warn("XPTempo: {}", message);
 				}
 			}
 		});
@@ -496,16 +496,16 @@ public class XPulsePlugin extends Plugin
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
 	{
-		if (!XPulseConfig.GROUP.equals(event.getGroup()))
+		if (!XPTempoConfig.GROUP.equals(event.getGroup()))
 		{
 			return;
 		}
 		api.configure(config.apiBaseUrl(), config.apiKey());
-		if (XPulseConfig.KEY_PAIRING_CODE.equals(event.getKey()))
+		if (XPTempoConfig.KEY_PAIRING_CODE.equals(event.getKey()))
 		{
 			maybePair();
 		}
-		if (XPulseConfig.KEY_ENABLED.equals(event.getKey()) || XPulseConfig.KEY_API_KEY.equals(event.getKey()))
+		if (XPTempoConfig.KEY_ENABLED.equals(event.getKey()) || XPTempoConfig.KEY_API_KEY.equals(event.getKey()))
 		{
 			// Turning uploads on (or finishing pairing) mid-session: start a fresh session so the server gets the seed.
 			clientThread.invoke(() ->
@@ -538,7 +538,7 @@ public class XPulsePlugin extends Plugin
 		{
 			if (types.contains(t))
 			{
-				log.debug("XPulse: not tracking on a {} world", t);
+				log.debug("XPTempo: not tracking on a {} world", t);
 				endSession("LOGOUT");
 				return;
 			}
@@ -574,7 +574,7 @@ public class XPulsePlugin extends Plugin
 			lastFlushMs = now;
 			lastHeartbeatMs = now;
 			urgent = true;
-			log.debug("XPulse: session {} started for {} on world {}", sessionId, displayName, world);
+			log.debug("XPTempo: session {} started for {} on world {}", sessionId, displayName, world);
 		}
 		else
 		{
@@ -729,14 +729,14 @@ public class XPulsePlugin extends Plugin
 		pairing = true;
 		api.pair(code, "RuneLite on " + System.getProperty("os.name"), response ->
 		{
-			configManager.setConfiguration(XPulseConfig.GROUP, XPulseConfig.KEY_API_KEY, response.apiKey);
-			configManager.setConfiguration(XPulseConfig.GROUP, XPulseConfig.KEY_PAIRING_CODE, "");
+			configManager.setConfiguration(XPTempoConfig.GROUP, XPTempoConfig.KEY_API_KEY, response.apiKey);
+			configManager.setConfiguration(XPTempoConfig.GROUP, XPTempoConfig.KEY_PAIRING_CODE, "");
 			pairing = false;
-			chat("XPulse: paired with " + response.userEmail + ". Enable \"Send data to XPulse\" to start uploading.");
+			chat("XPTempo: paired with " + response.userEmail + ". Enable \"Send data to XPTempo\" to start uploading.");
 		}, error ->
 		{
 			pairing = false;
-			chat("XPulse: pairing failed (" + error + "). Get a fresh code from the app and try again.");
+			chat("XPTempo: pairing failed (" + error + "). Get a fresh code from the app and try again.");
 		});
 	}
 

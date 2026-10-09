@@ -1,8 +1,8 @@
-package com.xpulse;
+package com.xptempo;
 
-import com.xpulse.tracker.ContainerTracker;
-import com.xpulse.tracker.ContainerTracker.Kind;
-import com.xpulse.tracker.ContainerTracker.Snapshot;
+import com.xptempo.tracker.ContainerTracker;
+import com.xptempo.tracker.ContainerTracker.Kind;
+import com.xptempo.tracker.ContainerTracker.Snapshot;
 import org.junit.Test;
 
 import static org.junit.Assert.assertArrayEquals;

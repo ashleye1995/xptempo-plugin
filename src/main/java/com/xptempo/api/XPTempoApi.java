@@ -1,4 +1,4 @@
-package com.xpulse.api;
+package com.xptempo.api;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonSyntaxException;
@@ -20,12 +20,12 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 
 /**
- * HTTP client for the XPulse API. Every call is asynchronous (OkHttp enqueue) and never runs on the client
+ * HTTP client for the XPTempo API. Every call is asynchronous (OkHttp enqueue) and never runs on the client
  * thread. Batches are sent one at a time in order; failures retry the same batch (same batchId, so the server
  * can deduplicate) with exponential back-off from 5 s to 5 min.
  */
 @Slf4j
-public final class XPulseApi
+public final class XPTempoApi
 {
 	public interface Listener
 	{
@@ -54,7 +54,7 @@ public final class XPulseApi
 	private int failures;
 	private CompletableFuture<Void> drained;
 
-	public XPulseApi(OkHttpClient base, Gson gson, ScheduledExecutorService executor, String userAgent, Listener listener)
+	public XPTempoApi(OkHttpClient base, Gson gson, ScheduledExecutorService executor, String userAgent, Listener listener)
 	{
 		// Derive from RuneLite's shared client (Hub rule: never construct your own); only the call timeout changes.
 		this.http = base.newBuilder().callTimeout(15, TimeUnit.SECONDS).build();
@@ -110,7 +110,7 @@ public final class XPulseApi
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
-				onError.accept("could not reach the XPulse API: " + e.getMessage());
+				onError.accept("could not reach the XPTempo API: " + e.getMessage());
 			}
 
 			@Override
@@ -130,7 +130,7 @@ public final class XPulseApi
 				}
 				catch (IOException | JsonSyntaxException e)
 				{
-					onError.accept("bad response from the XPulse API: " + e.getMessage());
+					onError.accept("bad response from the XPTempo API: " + e.getMessage());
 				}
 			}
 		});
@@ -179,7 +179,7 @@ public final class XPulseApi
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
-				synchronized (XPulseApi.this)
+				synchronized (XPTempoApi.this)
 				{
 					sending = false;
 				}
@@ -211,14 +211,14 @@ public final class XPulseApi
 				}
 				catch (IOException e)
 				{
-					synchronized (XPulseApi.this)
+					synchronized (XPTempoApi.this)
 					{
 						sending = false;
 					}
 					scheduleRetry("could not read response: " + e.getMessage(), -1);
 					return;
 				}
-				synchronized (XPulseApi.this)
+				synchronized (XPTempoApi.this)
 				{
 					sending = false;
 				}
@@ -246,7 +246,7 @@ public final class XPulseApi
 			}
 			catch (JsonSyntaxException e)
 			{
-				log.warn("XPulse: unreadable ack: {}", e.getMessage());
+				log.warn("XPTempo: unreadable ack: {}", e.getMessage());
 			}
 			executor.execute(this::sendNext);
 			return;
