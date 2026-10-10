@@ -16,8 +16,8 @@ public interface XPTempoConfig extends Config
 	@ConfigItem(
 		keyName = KEY_ENABLED,
 		name = "Enable XPTempo",
-		description = "Sends your own character's skills and XP, activity and session time, bank, inventory, worn items, Grand Exchange offers, and quest, achievement diary and combat achievement progress to your XPTempo account. Nothing is sent until you pair.",
-		warning = "Enabling XPTempo sends your character's data (skills and XP, activity and session time, bank, inventory, worn items, Grand Exchange offers, and quest, achievement diary and combat achievement progress) and your IP address to XPTempo's servers at api.xptempo.com, which are not run or verified by the RuneLite developers. Nothing is sent until you pair the plugin with your account, and you can turn this off at any time.",
+		description = "Sends your own character's skills and XP, activity and session time, bank, inventory, worn items, Grand Exchange offers, drops and kill counts, and quest, achievement diary and combat achievement progress to your XPTempo account. Nothing is sent until you pair.",
+		warning = "Enabling XPTempo sends your character's data (skills and XP, activity and session time, bank, inventory, worn items, Grand Exchange offers, drops and kill counts, and quest, achievement diary and combat achievement progress) and your IP address to XPTempo's servers at api.xptempo.com, which are not run or verified by the RuneLite developers. Nothing is sent until you pair the plugin with your account, and you can turn this off at any time.",
 		position = 0
 	)
 	default boolean enabled()
@@ -72,6 +72,13 @@ public interface XPTempoConfig extends Config
 	@ConfigItem(keyName = "uploadGe", name = "Grand Exchange offers", position = 6, section = categories,
 		description = "Send your GE offers and their progress.")
 	default boolean uploadGe()
+	{
+		return true;
+	}
+
+	@ConfigItem(keyName = "uploadLoot", name = "Drops and kill counts", position = 7, section = categories,
+		description = "Send what monsters and chests drop you (item ids and quantities, valued on the server), the kill counts the game announces, and the collection log and combat achievement totals when you open them.")
+	default boolean uploadLoot()
 	{
 		return true;
 	}

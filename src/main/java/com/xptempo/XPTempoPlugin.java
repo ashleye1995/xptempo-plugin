@@ -9,12 +9,15 @@ import com.xptempo.tracker.GeOfferTracker;
 import com.xptempo.tracker.XpTracker;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Actor;
@@ -33,6 +36,7 @@ import net.runelite.api.Varbits;
 import net.runelite.api.WorldType;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ActorDeath;
+import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GrandExchangeOfferChanged;
@@ -46,15 +50,21 @@ import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
+import net.runelite.api.widgets.Widget;
 import net.runelite.client.RuneLiteProperties;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ClientShutdown;
 import net.runelite.client.events.ConfigChanged;
+import net.runelite.client.events.NpcLootReceived;
+import net.runelite.client.events.PlayerLootReceived;
+import net.runelite.client.game.ItemStack;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.plugins.loottracker.LootReceived;
+import net.runelite.client.util.Text;
 import okhttp3.OkHttpClient;
 
 /**
@@ -70,7 +80,9 @@ import okhttp3.OkHttpClient;
 )
 public class XPTempoPlugin extends Plugin
 {
-	static final String VERSION = "0.4.0";
+	static final String VERSION = "0.5.0";
+	/** "Your Vorkath kill count is: 178." and the chest / completion / harvest / lap variants. */
+	private static final Pattern KILL_COUNT = Pattern.compile("^Your (.+?) (kill|completion|chest|harvest|success|lap|rumour|catch) count is:? ([\\d,]+)");
 	/** StatChanged and GE bursts for two ticks after LOGGED_IN; XP and the display name are unreliable until then. */
 	private static final int INIT_TICKS = 2;
 	private static final long ACTIVE_WINDOW_MS = 2 * 60_000L;
@@ -512,6 +524,136 @@ public class XPTempoPlugin extends Plugin
 		else if (event.getGroupId() == InterfaceID.GE_OFFERS)
 		{
 			geOpen = true;
+		}
+		else if (event.getGroupId() == InterfaceID.COLLECTION || event.getGroupId() == InterfaceID.COLLECTION_OVERVIEW)
+		{
+			readCounts(event.getGroupId(), "COLLECTION_LOG");
+		}
+		else if (event.getGroupId() == InterfaceID.CA_OVERVIEW)
+		{
+			readCounts(event.getGroupId(), "COMBAT_ACHIEVEMENTS");
+		}
+	}
+
+	// ---------------------------------------------------------------- loot, kill counts, overview totals
+
+	@Subscribe
+	public void onNpcLootReceived(NpcLootReceived event)
+	{
+		NPC npc = event.getNpc();
+		addLoot(npc.getName(), "NPC", npc.getCombatLevel(), event.getItems());
+	}
+
+	@Subscribe
+	public void onPlayerLootReceived(PlayerLootReceived event)
+	{
+		addLoot(event.getPlayer().getName(), "PLAYER", event.getPlayer().getCombatLevel(), event.getItems());
+	}
+
+	@Subscribe
+	public void onLootReceived(LootReceived event)
+	{
+		// NPC and player kills already arrive through the two events above; this adds chests, caskets and pickpockets.
+		String type = event.getType() == null ? "UNKNOWN" : event.getType().name();
+		if ("NPC".equals(type) || "PLAYER".equals(type))
+		{
+			return;
+		}
+		addLoot(event.getName(), type, event.getCombatLevel(), event.getItems());
+	}
+
+	private void addLoot(String source, String sourceType, int combatLevel, Collection<ItemStack> items)
+	{
+		if (initTicks != 0 || sessionId == null || !config.uploadLoot() || source == null || items == null || items.isEmpty())
+		{
+			return;
+		}
+		Map<Integer, Integer> byId = new LinkedHashMap<>();
+		for (ItemStack stack : items)
+		{
+			int id = itemManager.canonicalize(stack.getId());
+			byId.merge(id, stack.getQuantity(), Integer::sum);
+		}
+		List<int[]> rows = new ArrayList<>();
+		for (Map.Entry<Integer, Integer> e : byId.entrySet())
+		{
+			rows.add(new int[]{e.getKey(), e.getValue()});
+		}
+		pendingEvents.add(event("loot", System.currentTimeMillis(),
+			"source", Text.removeTags(source),
+			"sourceType", sourceType,
+			"combatLevel", Math.max(0, combatLevel),
+			"items", rows));
+		urgent = true;
+	}
+
+	@Subscribe
+	public void onChatMessage(ChatMessage event)
+	{
+		if (initTicks != 0 || sessionId == null || !config.uploadLoot())
+		{
+			return;
+		}
+		if (event.getType() != ChatMessageType.GAMEMESSAGE && event.getType() != ChatMessageType.SPAM)
+		{
+			return;
+		}
+		Matcher m = KILL_COUNT.matcher(Text.removeTags(event.getMessage()));
+		if (m.find())
+		{
+			pendingEvents.add(event("kill_count", System.currentTimeMillis(),
+				"source", m.group(1),
+				"kind", m.group(2),
+				"count", Integer.parseInt(m.group(3).replace(",", ""))));
+		}
+	}
+
+	/** One tick after an overview opens, send the texts it shows ("734/1,590", "Points: 300/2,000") for the server to parse. */
+	private void readCounts(int groupId, String name)
+	{
+		if (sessionId == null || !config.uploadLoot())
+		{
+			return;
+		}
+		clientThread.invokeLater(() ->
+		{
+			List<String> texts = new ArrayList<>();
+			for (int child = 0; child < 60 && texts.size() < 40; child++)
+			{
+				collectTexts(client.getWidget(groupId, child), texts, 0);
+			}
+			if (!texts.isEmpty())
+			{
+				pendingEvents.add(event("counts", System.currentTimeMillis(), "interface", name, "texts", texts));
+				urgent = true;
+			}
+		});
+	}
+
+	private static void collectTexts(Widget w, List<String> out, int depth)
+	{
+		if (w == null || depth > 4 || out.size() >= 40)
+		{
+			return;
+		}
+		String t = w.getText();
+		if (t != null)
+		{
+			t = Text.removeTags(t).trim();
+			if (t.matches(".*\\d[\\d,]*\\s*/\\s*\\d[\\d,]*.*") && !out.contains(t))
+			{
+				out.add(t.length() > 120 ? t.substring(0, 120) : t);
+			}
+		}
+		for (Widget[] group : new Widget[][]{w.getStaticChildren(), w.getDynamicChildren(), w.getNestedChildren()})
+		{
+			if (group != null)
+			{
+				for (Widget c : group)
+				{
+					collectTexts(c, out, depth + 1);
+				}
+			}
 		}
 	}
 
