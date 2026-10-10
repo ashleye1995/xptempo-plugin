@@ -32,7 +32,6 @@ import net.runelite.api.Player;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
-import net.runelite.api.Varbits;
 import net.runelite.api.WorldType;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ActorDeath;
@@ -80,7 +79,7 @@ import okhttp3.OkHttpClient;
 )
 public class XPTempoPlugin extends Plugin
 {
-	static final String VERSION = "0.5.0";
+	static final String VERSION = "0.6.0";
 	/** "Your Vorkath kill count is: 178." and the chest / completion / harvest / lap variants. */
 	private static final Pattern KILL_COUNT = Pattern.compile("^Your (.+?) (kill|completion|chest|harvest|success|lap|rumour|catch) count is:? ([\\d,]+)");
 	/** StatChanged and GE bursts for two ticks after LOGGED_IN; XP and the display name are unreliable until then. */
@@ -90,28 +89,44 @@ public class XPTempoPlugin extends Plugin
 	private static final long EQUIPMENT_DEBOUNCE_MS = 5_000L;
 	private static final EnumSet<WorldType> SKIPPED_WORLDS = EnumSet.of(
 		WorldType.DEADMAN, WorldType.SEASONAL, WorldType.BETA_WORLD, WorldType.TOURNAMENT_WORLD);
-	/** Achievement diary completion varbits, one row per region in the API's region order, tiers Easy→Elite. */
+	/** Achievement diary regions in the API's order; the tables below follow it, tiers Easy→Elite. */
 	private static final String[] DIARY_REGIONS = {
 		"ARDOUGNE", "DESERT", "FALADOR", "FREMENNIK", "KANDARIN", "KARAMJA", "KOUREND", "LUMBRIDGE", "MORYTANIA", "VARROCK", "WESTERN", "WILDERNESS"};
 	private static final String[] DIARY_TIERS = {"EASY", "MEDIUM", "HARD", "ELITE"};
-	private static final int[][] DIARY_VARBITS = {
-		{Varbits.DIARY_ARDOUGNE_EASY, Varbits.DIARY_ARDOUGNE_MEDIUM, Varbits.DIARY_ARDOUGNE_HARD, Varbits.DIARY_ARDOUGNE_ELITE},
-		{Varbits.DIARY_DESERT_EASY, Varbits.DIARY_DESERT_MEDIUM, Varbits.DIARY_DESERT_HARD, Varbits.DIARY_DESERT_ELITE},
-		{Varbits.DIARY_FALADOR_EASY, Varbits.DIARY_FALADOR_MEDIUM, Varbits.DIARY_FALADOR_HARD, Varbits.DIARY_FALADOR_ELITE},
-		{Varbits.DIARY_FREMENNIK_EASY, Varbits.DIARY_FREMENNIK_MEDIUM, Varbits.DIARY_FREMENNIK_HARD, Varbits.DIARY_FREMENNIK_ELITE},
-		{Varbits.DIARY_KANDARIN_EASY, Varbits.DIARY_KANDARIN_MEDIUM, Varbits.DIARY_KANDARIN_HARD, Varbits.DIARY_KANDARIN_ELITE},
-		{Varbits.DIARY_KARAMJA_EASY, Varbits.DIARY_KARAMJA_MEDIUM, Varbits.DIARY_KARAMJA_HARD, Varbits.DIARY_KARAMJA_ELITE},
-		{Varbits.DIARY_KOUREND_EASY, Varbits.DIARY_KOUREND_MEDIUM, Varbits.DIARY_KOUREND_HARD, Varbits.DIARY_KOUREND_ELITE},
-		{Varbits.DIARY_LUMBRIDGE_EASY, Varbits.DIARY_LUMBRIDGE_MEDIUM, Varbits.DIARY_LUMBRIDGE_HARD, Varbits.DIARY_LUMBRIDGE_ELITE},
-		{Varbits.DIARY_MORYTANIA_EASY, Varbits.DIARY_MORYTANIA_MEDIUM, Varbits.DIARY_MORYTANIA_HARD, Varbits.DIARY_MORYTANIA_ELITE},
-		{Varbits.DIARY_VARROCK_EASY, Varbits.DIARY_VARROCK_MEDIUM, Varbits.DIARY_VARROCK_HARD, Varbits.DIARY_VARROCK_ELITE},
-		{Varbits.DIARY_WESTERN_EASY, Varbits.DIARY_WESTERN_MEDIUM, Varbits.DIARY_WESTERN_HARD, Varbits.DIARY_WESTERN_ELITE},
-		{Varbits.DIARY_WILDERNESS_EASY, Varbits.DIARY_WILDERNESS_MEDIUM, Varbits.DIARY_WILDERNESS_HARD, Varbits.DIARY_WILDERNESS_ELITE},
+	/** Tier complete flags (every task done). Karamja Easy–Hard use ATJUN_*_DONE, which is 1 when started and 2 when complete. */
+	private static final int[][] DIARY_COMPLETE_VARBITS = {
+		{VarbitID.ARDOUGNE_DIARY_EASY_COMPLETE, VarbitID.ARDOUGNE_DIARY_MEDIUM_COMPLETE, VarbitID.ARDOUGNE_DIARY_HARD_COMPLETE, VarbitID.ARDOUGNE_DIARY_ELITE_COMPLETE},
+		{VarbitID.DESERT_DIARY_EASY_COMPLETE, VarbitID.DESERT_DIARY_MEDIUM_COMPLETE, VarbitID.DESERT_DIARY_HARD_COMPLETE, VarbitID.DESERT_DIARY_ELITE_COMPLETE},
+		{VarbitID.FALADOR_DIARY_EASY_COMPLETE, VarbitID.FALADOR_DIARY_MEDIUM_COMPLETE, VarbitID.FALADOR_DIARY_HARD_COMPLETE, VarbitID.FALADOR_DIARY_ELITE_COMPLETE},
+		{VarbitID.FREMENNIK_DIARY_EASY_COMPLETE, VarbitID.FREMENNIK_DIARY_MEDIUM_COMPLETE, VarbitID.FREMENNIK_DIARY_HARD_COMPLETE, VarbitID.FREMENNIK_DIARY_ELITE_COMPLETE},
+		{VarbitID.KANDARIN_DIARY_EASY_COMPLETE, VarbitID.KANDARIN_DIARY_MEDIUM_COMPLETE, VarbitID.KANDARIN_DIARY_HARD_COMPLETE, VarbitID.KANDARIN_DIARY_ELITE_COMPLETE},
+		{VarbitID.ATJUN_EASY_DONE, VarbitID.ATJUN_MED_DONE, VarbitID.ATJUN_HARD_DONE, VarbitID.KARAMJA_DIARY_ELITE_COMPLETE},
+		{VarbitID.KOUREND_DIARY_EASY_COMPLETE, VarbitID.KOUREND_DIARY_MEDIUM_COMPLETE, VarbitID.KOUREND_DIARY_HARD_COMPLETE, VarbitID.KOUREND_DIARY_ELITE_COMPLETE},
+		{VarbitID.LUMBRIDGE_DIARY_EASY_COMPLETE, VarbitID.LUMBRIDGE_DIARY_MEDIUM_COMPLETE, VarbitID.LUMBRIDGE_DIARY_HARD_COMPLETE, VarbitID.LUMBRIDGE_DIARY_ELITE_COMPLETE},
+		{VarbitID.MORYTANIA_DIARY_EASY_COMPLETE, VarbitID.MORYTANIA_DIARY_MEDIUM_COMPLETE, VarbitID.MORYTANIA_DIARY_HARD_COMPLETE, VarbitID.MORYTANIA_DIARY_ELITE_COMPLETE},
+		{VarbitID.VARROCK_DIARY_EASY_COMPLETE, VarbitID.VARROCK_DIARY_MEDIUM_COMPLETE, VarbitID.VARROCK_DIARY_HARD_COMPLETE, VarbitID.VARROCK_DIARY_ELITE_COMPLETE},
+		{VarbitID.WESTERN_DIARY_EASY_COMPLETE, VarbitID.WESTERN_DIARY_MEDIUM_COMPLETE, VarbitID.WESTERN_DIARY_HARD_COMPLETE, VarbitID.WESTERN_DIARY_ELITE_COMPLETE},
+		{VarbitID.WILDERNESS_DIARY_EASY_COMPLETE, VarbitID.WILDERNESS_DIARY_MEDIUM_COMPLETE, VarbitID.WILDERNESS_DIARY_HARD_COMPLETE, VarbitID.WILDERNESS_DIARY_ELITE_COMPLETE},
+	};
+	/** Tasks done per tier: the counts the in-game Achievement Diary tab shows. */
+	private static final int[][] DIARY_COUNT_VARBITS = {
+		{VarbitID.ARDOUGNE_EASY_COUNT, VarbitID.ARDOUGNE_MED_COUNT, VarbitID.ARDOUGNE_HARD_COUNT, VarbitID.ARDOUGNE_ELITE_COUNT},
+		{VarbitID.DESERT_EASY_COUNT, VarbitID.DESERT_MED_COUNT, VarbitID.DESERT_HARD_COUNT, VarbitID.DESERT_ELITE_COUNT},
+		{VarbitID.FALADOR_EASY_COUNT, VarbitID.FALADOR_MED_COUNT, VarbitID.FALADOR_HARD_COUNT, VarbitID.FALADOR_ELITE_COUNT},
+		{VarbitID.FREMENNIK_EASY_COUNT, VarbitID.FREMENNIK_MED_COUNT, VarbitID.FREMENNIK_HARD_COUNT, VarbitID.FREMENNIK_ELITE_COUNT},
+		{VarbitID.KANDARIN_EASY_COUNT, VarbitID.KANDARIN_MED_COUNT, VarbitID.KANDARIN_HARD_COUNT, VarbitID.KANDARIN_ELITE_COUNT},
+		{VarbitID.KARAMJA_EASY_COUNT, VarbitID.KARAMJA_MED_COUNT, VarbitID.KARAMJA_HARD_COUNT, VarbitID.KARAMJA_ELITE_COUNT},
+		{VarbitID.KOUREND_EASY_COUNT, VarbitID.KOUREND_MED_COUNT, VarbitID.KOUREND_HARD_COUNT, VarbitID.KOUREND_ELITE_COUNT},
+		{VarbitID.LUMBRIDGE_EASY_COUNT, VarbitID.LUMBRIDGE_MED_COUNT, VarbitID.LUMBRIDGE_HARD_COUNT, VarbitID.LUMBRIDGE_ELITE_COUNT},
+		{VarbitID.MORYTANIA_EASY_COUNT, VarbitID.MORYTANIA_MED_COUNT, VarbitID.MORYTANIA_HARD_COUNT, VarbitID.MORYTANIA_ELITE_COUNT},
+		{VarbitID.VARROCK_EASY_COUNT, VarbitID.VARROCK_MED_COUNT, VarbitID.VARROCK_HARD_COUNT, VarbitID.VARROCK_ELITE_COUNT},
+		{VarbitID.WESTERN_EASY_COUNT, VarbitID.WESTERN_MED_COUNT, VarbitID.WESTERN_HARD_COUNT, VarbitID.WESTERN_ELITE_COUNT},
+		{VarbitID.WILDERNESS_EASY_COUNT, VarbitID.WILDERNESS_MED_COUNT, VarbitID.WILDERNESS_HARD_COUNT, VarbitID.WILDERNESS_ELITE_COUNT},
 	};
 	private static final String[] CA_TIERS = {"EASY", "MEDIUM", "HARD", "ELITE", "MASTER", "GRANDMASTER"};
 	private static final int[] CA_TIER_VARBITS = {
-		Varbits.COMBAT_ACHIEVEMENT_TIER_EASY, Varbits.COMBAT_ACHIEVEMENT_TIER_MEDIUM, Varbits.COMBAT_ACHIEVEMENT_TIER_HARD,
-		Varbits.COMBAT_ACHIEVEMENT_TIER_ELITE, Varbits.COMBAT_ACHIEVEMENT_TIER_MASTER, Varbits.COMBAT_ACHIEVEMENT_TIER_GRANDMASTER};
+		VarbitID.CA_TIER_STATUS_EASY, VarbitID.CA_TIER_STATUS_MEDIUM, VarbitID.CA_TIER_STATUS_HARD,
+		VarbitID.CA_TIER_STATUS_ELITE, VarbitID.CA_TIER_STATUS_MASTER, VarbitID.CA_TIER_STATUS_GRANDMASTER};
 
 	@Inject
 	private Client client;
@@ -338,21 +353,15 @@ public class XPTempoPlugin extends Plugin
 		{
 			return; // the login burst is covered by the seed snapshot
 		}
-		if (event.getVarbitId() == -1)
+		int varp = event.getVarpId();
+		if (varp == VarPlayerID.QP || DiaryVarps.isTracked(varp)
+			|| (event.getVarbitId() != -1 && isCaTierVarbit(event.getVarbitId())))
 		{
-			if (event.getVarpId() == VarPlayerID.QP)
-			{
-				milestonesDirty = true;
-			}
-			return;
-		}
-		if (isMilestoneVarbit(event.getVarbitId()))
-		{
-			milestonesDirty = true;
+			milestonesDirty = true; // several changes in one tick still make one snapshot
 		}
 	}
 
-	private static boolean isMilestoneVarbit(int id)
+	private static boolean isCaTierVarbit(int id)
 	{
 		for (int v : CA_TIER_VARBITS)
 		{
@@ -361,20 +370,13 @@ public class XPTempoPlugin extends Plugin
 				return true;
 			}
 		}
-		for (int[] region : DIARY_VARBITS)
-		{
-			for (int v : region)
-			{
-				if (v == id)
-				{
-					return true;
-				}
-			}
-		}
 		return false;
 	}
 
-	/** Quest points and list, completed combat-achievement tiers and every diary tier flag. Client thread only. */
+	/**
+	 * Quest points and list, completed combat-achievement tiers, every diary tier's flag and task count, and the
+	 * raw diary varps the server decodes into individual tasks. Client thread only.
+	 */
 	private void addMilestones(long now)
 	{
 		int questsDone = 0;
@@ -403,16 +405,25 @@ public class XPTempoPlugin extends Plugin
 				Map<String, Object> row = new LinkedHashMap<>();
 				row.put("region", DIARY_REGIONS[r]);
 				row.put("tier", DIARY_TIERS[t]);
-				row.put("complete", client.getVarbitValue(DIARY_VARBITS[r][t]) >= 1);
+				int karamjaStaged = "KARAMJA".equals(DIARY_REGIONS[r]) && t < 3 ? 2 : 1;
+				row.put("complete", client.getVarbitValue(DIARY_COMPLETE_VARBITS[r][t]) >= karamjaStaged);
+				row.put("tasksDone", client.getVarbitValue(DIARY_COUNT_VARBITS[r][t]));
 				diaries.add(row);
 			}
+		}
+		// Raw signed values: the server decodes which task each bit belongs to, so a mapping fix never needs a plugin update.
+		List<int[]> diaryVarps = new ArrayList<>();
+		for (int varp : DiaryVarps.VARPS)
+		{
+			diaryVarps.add(new int[]{varp, client.getVarpValue(varp)});
 		}
 		pendingEvents.add(event("milestones", now,
 			"questPoints", client.getVarpValue(VarPlayerID.QP),
 			"questsDone", questsDone,
 			"questsTotal", questsTotal,
 			"caTiers", caTiers,
-			"diaries", diaries));
+			"diaries", diaries,
+			"diaryVarps", diaryVarps));
 	}
 
 	// ---------------------------------------------------------------- skills

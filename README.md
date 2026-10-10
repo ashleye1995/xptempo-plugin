@@ -31,7 +31,8 @@ Only for the character you are logged into, only while the plugin is enabled, an
 - **Grand Exchange offers** — every offer change, with a stable id per offer so restarts never duplicate one.
 - **Drops and kill counts** — what monsters and chests drop you, the kill counts the game announces, and the
   collection log and combat achievement totals when you open those interfaces.
-- **Progress** — quest points, quests finished, combat achievement tiers and the 48 achievement diary tier flags.
+- **Progress** — quest points, quests finished, combat achievement tiers, and achievement diary progress: each tier's
+  completion and task count, plus the game's diary task variables so the app can tick individual tasks.
 
 Everything except skills and session time has its own switch under "What to send". Items are valued on the
 server with the OSRS Wiki's real-time prices. Batches retry with back-off when the API is unreachable.
