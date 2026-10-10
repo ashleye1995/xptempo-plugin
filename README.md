@@ -1,7 +1,7 @@
 # XPTempo RuneLite plugin
 
-Sends your own character's XP, activity and session time (later: bank, inventory and GE offers) to your
-XPTempo account. Opt-in, read-only, written against the rules in `../Vault/research/runelite-plugin.md`.
+Sends your own character's XP, activity and session time, bank, inventory, worn items, GE offers and quest,
+diary and combat-achievement progress to your XPTempo account. Opt-in, read-only, written against the rules in `../Vault/research/runelite-plugin.md`.
 
 ## Develop
 
@@ -39,6 +39,9 @@ The plugin always talks to `https://api.xptempo.com`; there is no URL setting. T
 - `ge_offer`: every offer change, with a stable `clientOfferId` per offer kept in RuneLite's per-character config
   (`geoffer.<slot>`), so the login burst and restarts never duplicate an offer; a slot going empty is sent as
   `collected`.
+- `milestones`: quest points and how many quests are finished, which combat-achievement tiers are complete and
+  the 48 achievement-diary tier flags, read from varbits at login and again whenever one of them changes. Combat
+  achievement points and collection-log counts have no readable varbit in RuneLite 1.13, so they are not sent.
 
 Each category has its own switch under "What to send". Batches retry with back-off and merge when the API is
 unreachable.

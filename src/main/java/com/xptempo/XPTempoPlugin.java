@@ -26,7 +26,10 @@ import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.NPC;
 import net.runelite.api.Player;
+import net.runelite.api.Quest;
+import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
+import net.runelite.api.Varbits;
 import net.runelite.api.WorldType;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ActorDeath;
@@ -36,10 +39,12 @@ import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.api.events.HitsplatApplied;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.StatChanged;
+import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.events.WidgetClosed;
 import net.runelite.api.events.WidgetLoaded;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.client.RuneLiteProperties;
 import net.runelite.client.callback.ClientThread;
@@ -65,7 +70,7 @@ import okhttp3.OkHttpClient;
 )
 public class XPTempoPlugin extends Plugin
 {
-	static final String VERSION = "0.2.0";
+	static final String VERSION = "0.4.0";
 	/** StatChanged and GE bursts for two ticks after LOGGED_IN; XP and the display name are unreliable until then. */
 	private static final int INIT_TICKS = 2;
 	private static final long ACTIVE_WINDOW_MS = 2 * 60_000L;
@@ -73,6 +78,28 @@ public class XPTempoPlugin extends Plugin
 	private static final long EQUIPMENT_DEBOUNCE_MS = 5_000L;
 	private static final EnumSet<WorldType> SKIPPED_WORLDS = EnumSet.of(
 		WorldType.DEADMAN, WorldType.SEASONAL, WorldType.BETA_WORLD, WorldType.TOURNAMENT_WORLD);
+	/** Achievement diary completion varbits, one row per region in the API's region order, tiers Easy→Elite. */
+	private static final String[] DIARY_REGIONS = {
+		"ARDOUGNE", "DESERT", "FALADOR", "FREMENNIK", "KANDARIN", "KARAMJA", "KOUREND", "LUMBRIDGE", "MORYTANIA", "VARROCK", "WESTERN", "WILDERNESS"};
+	private static final String[] DIARY_TIERS = {"EASY", "MEDIUM", "HARD", "ELITE"};
+	private static final int[][] DIARY_VARBITS = {
+		{Varbits.DIARY_ARDOUGNE_EASY, Varbits.DIARY_ARDOUGNE_MEDIUM, Varbits.DIARY_ARDOUGNE_HARD, Varbits.DIARY_ARDOUGNE_ELITE},
+		{Varbits.DIARY_DESERT_EASY, Varbits.DIARY_DESERT_MEDIUM, Varbits.DIARY_DESERT_HARD, Varbits.DIARY_DESERT_ELITE},
+		{Varbits.DIARY_FALADOR_EASY, Varbits.DIARY_FALADOR_MEDIUM, Varbits.DIARY_FALADOR_HARD, Varbits.DIARY_FALADOR_ELITE},
+		{Varbits.DIARY_FREMENNIK_EASY, Varbits.DIARY_FREMENNIK_MEDIUM, Varbits.DIARY_FREMENNIK_HARD, Varbits.DIARY_FREMENNIK_ELITE},
+		{Varbits.DIARY_KANDARIN_EASY, Varbits.DIARY_KANDARIN_MEDIUM, Varbits.DIARY_KANDARIN_HARD, Varbits.DIARY_KANDARIN_ELITE},
+		{Varbits.DIARY_KARAMJA_EASY, Varbits.DIARY_KARAMJA_MEDIUM, Varbits.DIARY_KARAMJA_HARD, Varbits.DIARY_KARAMJA_ELITE},
+		{Varbits.DIARY_KOUREND_EASY, Varbits.DIARY_KOUREND_MEDIUM, Varbits.DIARY_KOUREND_HARD, Varbits.DIARY_KOUREND_ELITE},
+		{Varbits.DIARY_LUMBRIDGE_EASY, Varbits.DIARY_LUMBRIDGE_MEDIUM, Varbits.DIARY_LUMBRIDGE_HARD, Varbits.DIARY_LUMBRIDGE_ELITE},
+		{Varbits.DIARY_MORYTANIA_EASY, Varbits.DIARY_MORYTANIA_MEDIUM, Varbits.DIARY_MORYTANIA_HARD, Varbits.DIARY_MORYTANIA_ELITE},
+		{Varbits.DIARY_VARROCK_EASY, Varbits.DIARY_VARROCK_MEDIUM, Varbits.DIARY_VARROCK_HARD, Varbits.DIARY_VARROCK_ELITE},
+		{Varbits.DIARY_WESTERN_EASY, Varbits.DIARY_WESTERN_MEDIUM, Varbits.DIARY_WESTERN_HARD, Varbits.DIARY_WESTERN_ELITE},
+		{Varbits.DIARY_WILDERNESS_EASY, Varbits.DIARY_WILDERNESS_MEDIUM, Varbits.DIARY_WILDERNESS_HARD, Varbits.DIARY_WILDERNESS_ELITE},
+	};
+	private static final String[] CA_TIERS = {"EASY", "MEDIUM", "HARD", "ELITE", "MASTER", "GRANDMASTER"};
+	private static final int[] CA_TIER_VARBITS = {
+		Varbits.COMBAT_ACHIEVEMENT_TIER_EASY, Varbits.COMBAT_ACHIEVEMENT_TIER_MEDIUM, Varbits.COMBAT_ACHIEVEMENT_TIER_HARD,
+		Varbits.COMBAT_ACHIEVEMENT_TIER_ELITE, Varbits.COMBAT_ACHIEVEMENT_TIER_MASTER, Varbits.COMBAT_ACHIEVEMENT_TIER_GRANDMASTER};
 
 	@Inject
 	private Client client;
@@ -114,6 +141,7 @@ public class XPTempoPlugin extends Plugin
 	private long lastHeartbeatMs;
 	private int seq;
 	private boolean urgent;
+	private boolean milestonesDirty;
 	private boolean pairing;
 	private boolean bankOpen;
 	private boolean geOpen;
@@ -277,10 +305,102 @@ public class XPTempoPlugin extends Plugin
 			due = true;
 		}
 		drainContainers(now, false);
+		if (milestonesDirty)
+		{
+			addMilestones(now);
+			milestonesDirty = false;
+			due = true;
+		}
 		if ((due || urgent) && !pendingEvents.isEmpty())
 		{
 			sendBatch();
 		}
+	}
+
+	// ---------------------------------------------------------------- quests, diaries, combat achievements
+
+	@Subscribe
+	public void onVarbitChanged(VarbitChanged event)
+	{
+		if (initTicks != 0 || sessionId == null)
+		{
+			return; // the login burst is covered by the seed snapshot
+		}
+		if (event.getVarbitId() == -1)
+		{
+			if (event.getVarpId() == VarPlayerID.QP)
+			{
+				milestonesDirty = true;
+			}
+			return;
+		}
+		if (isMilestoneVarbit(event.getVarbitId()))
+		{
+			milestonesDirty = true;
+		}
+	}
+
+	private static boolean isMilestoneVarbit(int id)
+	{
+		for (int v : CA_TIER_VARBITS)
+		{
+			if (v == id)
+			{
+				return true;
+			}
+		}
+		for (int[] region : DIARY_VARBITS)
+		{
+			for (int v : region)
+			{
+				if (v == id)
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	/** Quest points and list, completed combat-achievement tiers and every diary tier flag. Client thread only. */
+	private void addMilestones(long now)
+	{
+		int questsDone = 0;
+		int questsTotal = 0;
+		for (Quest quest : Quest.values())
+		{
+			questsTotal++;
+			if (quest.getState(client) == QuestState.FINISHED)
+			{
+				questsDone++;
+			}
+		}
+		List<String> caTiers = new ArrayList<>();
+		for (int i = 0; i < CA_TIER_VARBITS.length; i++)
+		{
+			if (client.getVarbitValue(CA_TIER_VARBITS[i]) >= 1)
+			{
+				caTiers.add(CA_TIERS[i]);
+			}
+		}
+		List<Map<String, Object>> diaries = new ArrayList<>();
+		for (int r = 0; r < DIARY_REGIONS.length; r++)
+		{
+			for (int t = 0; t < DIARY_TIERS.length; t++)
+			{
+				Map<String, Object> row = new LinkedHashMap<>();
+				row.put("region", DIARY_REGIONS[r]);
+				row.put("tier", DIARY_TIERS[t]);
+				row.put("complete", client.getVarbitValue(DIARY_VARBITS[r][t]) >= 1);
+				diaries.add(row);
+			}
+		}
+		pendingEvents.add(event("milestones", now,
+			"questPoints", client.getVarpValue(VarPlayerID.QP),
+			"questsDone", questsDone,
+			"questsTotal", questsTotal,
+			"caTiers", caTiers,
+			"diaries", diaries));
 	}
 
 	// ---------------------------------------------------------------- skills
@@ -573,6 +693,7 @@ public class XPTempoPlugin extends Plugin
 				rows.add(row);
 			}
 			pendingEvents.add(event("skills", now, "skills", rows));
+			addMilestones(now);
 			lastFlushMs = now;
 			lastHeartbeatMs = now;
 			urgent = true;
