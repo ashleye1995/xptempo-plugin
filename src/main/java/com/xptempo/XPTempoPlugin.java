@@ -192,7 +192,9 @@ public class XPTempoPlugin extends Plugin
 			@Override
 			public void onUnauthorized()
 			{
-				chat("XPTempo: your API key was rejected. Open the plugin settings and pair again.");
+				// A rejected key is useless and would block the next pairing attempt, so forget it here.
+				configManager.setConfiguration(XPTempoConfig.GROUP, XPTempoConfig.KEY_API_KEY, "");
+				chat("XPTempo: the server rejected this client's key, so it was cleared. Get a pairing code from xptempo.com and paste it into the plugin settings.");
 			}
 
 			@Override
