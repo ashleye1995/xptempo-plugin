@@ -65,6 +65,19 @@ public final class XPTempoApi
 	}
 
 	/** Called at start-up and whenever the config changes. A new key un-pauses sending after a 401. */
+	/** Where every player's plugin sends data. Fixed: the service lives at api.xptempo.com. */
+	public static final String PRODUCTION_BASE_URL = "https://api.xptempo.com";
+
+	/**
+	 * The production address, unless a developer launched the client with -Dxptempo.api=http://127.0.0.1:3000
+	 * (the Gradle run task forwards the XPTEMPO_API environment variable as that property).
+	 */
+	public static String baseUrl()
+	{
+		String override = System.getProperty("xptempo.api");
+		return override == null || override.trim().isEmpty() ? PRODUCTION_BASE_URL : override.trim();
+	}
+
 	public void configure(String baseUrlText, String apiKey)
 	{
 		HttpUrl parsed = HttpUrl.parse(baseUrlText == null ? "" : baseUrlText.trim());

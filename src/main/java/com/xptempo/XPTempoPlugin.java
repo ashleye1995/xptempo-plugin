@@ -208,7 +208,7 @@ public class XPTempoPlugin extends Plugin
 				}
 			}
 		});
-		api.configure(config.apiBaseUrl(), config.apiKey());
+		api.configure(XPTempoApi.baseUrl(), config.apiKey());
 		clientThread.invoke(() ->
 		{
 			if (client.getGameState() == GameState.LOGGED_IN)
@@ -500,7 +500,7 @@ public class XPTempoPlugin extends Plugin
 		{
 			return;
 		}
-		api.configure(config.apiBaseUrl(), config.apiKey());
+		api.configure(XPTempoApi.baseUrl(), config.apiKey());
 		if (XPTempoConfig.KEY_PAIRING_CODE.equals(event.getKey()))
 		{
 			maybePair();

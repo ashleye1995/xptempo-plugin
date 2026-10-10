@@ -24,7 +24,7 @@ once (launch via the Jagex launcher with `--insecure-write-credentials`).
    stores the key in the **API key** field and clears the code. A chat message confirms the pairing.
 3. Tick **Send data to XPTempo** (the warning explains exactly what is sent).
 
-Advanced → API base URL defaults to `http://127.0.0.1:3000` for now.
+The plugin always talks to `https://api.xptempo.com`; there is no URL setting. To develop against a local API, run the dev client with `XPTEMPO_API=http://127.0.0.1:3000 ./gradlew run`.
 
 ## What is sent
 

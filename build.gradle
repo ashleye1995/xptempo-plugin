@@ -30,7 +30,7 @@ dependencies {
 }
 
 group = 'com.xptempo'
-version = '0.2.0'
+version = '0.3.0'
 
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
@@ -43,6 +43,9 @@ tasks.register('run', JavaExec) {
 
 	jvmArgs "-ea"
 	args "--developer-mode", "--debug"
+	if (System.getenv('XPTEMPO_API')) {
+		systemProperty 'xptempo.api', System.getenv('XPTEMPO_API')
+	}
 }
 
 tasks.register('shadowJar', Jar) {

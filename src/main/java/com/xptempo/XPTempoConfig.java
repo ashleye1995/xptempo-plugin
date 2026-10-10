@@ -12,7 +12,6 @@ public interface XPTempoConfig extends Config
 	String KEY_ENABLED = "enabled";
 	String KEY_PAIRING_CODE = "pairingCode";
 	String KEY_API_KEY = "apiKey";
-	String KEY_API_BASE_URL = "apiBaseUrl";
 
 	@ConfigItem(
 		keyName = KEY_ENABLED,
@@ -77,23 +76,4 @@ public interface XPTempoConfig extends Config
 		return true;
 	}
 
-	@ConfigSection(
-		name = "Advanced",
-		description = "Settings you should not need to change.",
-		position = 10,
-		closedByDefault = true
-	)
-	String advanced = "advanced";
-
-	@ConfigItem(
-		keyName = KEY_API_BASE_URL,
-		name = "API base URL",
-		description = "Where batches are sent. Only change this for a self-hosted XPTempo API.",
-		section = advanced,
-		position = 11
-	)
-	default String apiBaseUrl()
-	{
-		return "http://127.0.0.1:3000";
-	}
 }
