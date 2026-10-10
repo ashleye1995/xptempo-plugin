@@ -48,6 +48,16 @@ public final class GeOfferTracker
 	/** Returns the `ge_offer` event fields to send, or null when nothing changed. */
 	public Map<String, Object> onOffer(int slot, GrandExchangeOffer offer)
 	{
+		return onOffer(slot, offer, false);
+	}
+
+	/**
+	 * As {@link #onOffer(int, GrandExchangeOffer)}; with force, an unchanged non-empty slot is reported anyway
+	 * (a new session re-sends every open offer, so offers placed before uploads were switched on are not missed;
+	 * the server upserts by clientOfferId).
+	 */
+	public Map<String, Object> onOffer(int slot, GrandExchangeOffer offer, boolean force)
+	{
 		GrandExchangeOfferState rlState = offer.getState();
 		SavedOffer saved = store.load(slot);
 		if (rlState == GrandExchangeOfferState.EMPTY)
@@ -97,7 +107,7 @@ public final class GeOfferTracker
 		saved.spent = offer.getSpent();
 		saved.state = state;
 		store.save(slot, saved);
-		return changed ? fields(slot, saved, false) : null;
+		return changed || force ? fields(slot, saved, false) : null;
 	}
 
 	private static Map<String, Object> fields(int slot, SavedOffer o, boolean collected)

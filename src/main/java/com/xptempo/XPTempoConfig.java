@@ -16,8 +16,12 @@ public interface XPTempoConfig extends Config
 	@ConfigItem(
 		keyName = KEY_ENABLED,
 		name = "Enable XPTempo",
-		description = "Sends your own character's skills and XP, activity and session time, bank, inventory, worn items, Grand Exchange offers, drops and kill counts, and quest, achievement diary and combat achievement progress to your XPTempo account. Nothing is sent until you pair.",
-		warning = "Enabling XPTempo sends your character's data (skills and XP, activity and session time, bank, inventory, worn items, Grand Exchange offers, drops and kill counts, and quest, achievement diary and combat achievement progress) and your IP address to XPTempo's servers at api.xptempo.com, which are not run or verified by the RuneLite developers. Nothing is sent until you pair the plugin with your account, and you can turn this off at any time.",
+		description = "Sends your own characters' skills and XP, activity, sessions and deaths, quest, achievement diary and combat achievement progress, and (each switchable below) inventory and worn items, bank, Grand Exchange offers, and drops and kill counts to your XPTempo account. Nothing is sent until you pair.",
+		warning = "<html>This feature submits your IP address to a 3rd-party server not controlled or verified by RuneLite developers.<br>"
+			+ "XPTempo (api.xptempo.com) receives, for every character you play on this RuneLite profile: name, account ID, account type and world,<br>"
+			+ "skills and XP, what you are doing, sessions and deaths, quest, diary and combat achievement progress,<br>"
+			+ "and, unless switched off under \"What to send\": inventory, worn items, bank, GE offers, drops and kill counts.<br>"
+			+ "Nothing is sent until you pair. You can switch this off at any time. Privacy policy: xptempo.com/privacy</html>",
 		position = 0
 	)
 	default boolean enabled()
@@ -28,7 +32,7 @@ public interface XPTempoConfig extends Config
 	@ConfigItem(
 		keyName = KEY_PAIRING_CODE,
 		name = "Pairing code",
-		description = "The 8-character code shown in the XPTempo app. It is exchanged for an API key once, then cleared.",
+		description = "The 8-character code shown in the XPTempo app. Switch on \"Enable XPTempo\" first; the code is exchanged for an API key once, then cleared. One pairing covers every character played on this RuneLite profile.",
 		position = 1
 	)
 	default String pairingCode()
@@ -50,7 +54,7 @@ public interface XPTempoConfig extends Config
 
 	@ConfigSection(
 		name = "What to send",
-		description = "Each category can be switched off; skills and session time are always sent while enabled.",
+		description = "These four can be switched off. Skills and XP, activity, sessions, deaths and quest, diary and combat achievement progress are always sent while XPTempo is enabled.",
 		position = 3
 	)
 	String categories = "categories";

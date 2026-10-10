@@ -15,6 +15,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -33,7 +35,6 @@ import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.Skill;
 import net.runelite.api.WorldType;
-import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.ChatMessage;
 import net.runelite.api.events.GameStateChanged;
@@ -53,6 +54,7 @@ import net.runelite.api.widgets.Widget;
 import net.runelite.client.RuneLiteProperties;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.config.RuneScapeProfileType;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ClientShutdown;
 import net.runelite.client.events.ConfigChanged;
@@ -68,8 +70,9 @@ import okhttp3.OkHttpClient;
 
 /**
  * Sends the logged-in character's own data to the XPTempo API: sessions, skills and XP deltas,
- * inventory/bank/equipment contents, GE offers, deaths and level-ups, plus an activity heartbeat.
- * Design notes: Vault/research/runelite-plugin.md.
+ * inventory/bank/equipment contents, GE offers, drops, deaths and level-ups, quest/diary/combat
+ * achievement progress, plus an activity heartbeat. Read-only: it never changes anything in the game.
+ * Nothing is sent until the player switches on "Enable XPTempo" and pairs with a code from the app.
  */
 @Slf4j
 @PluginDescriptor(
@@ -164,6 +167,10 @@ public class XPTempoPlugin extends Plugin
 	private String accountType = "UNKNOWN";
 	private int world;
 	private String sessionId;
+	/** Something from this session actually went to the server (so a session_end is owed when uploads stop). */
+	private boolean sessionUploaded;
+	/** Characters the player unlinked in the app (as the server reports them): nothing more is sent for them this run. */
+	private final java.util.Set<Long> unlinkedHashes = ConcurrentHashMap.newKeySet();
 	private long lastFlushMs;
 	private long lastHeartbeatMs;
 	private int seq;
@@ -213,7 +220,7 @@ public class XPTempoPlugin extends Plugin
 		api = new XPTempoApi(okHttpClient, gson, executor, "XPTempo/" + VERSION, new XPTempoApi.Listener()
 		{
 			@Override
-			public void onAck(Payloads.Ack ack)
+			public void onAck(Payloads.Batch sent, Payloads.Ack ack)
 			{
 				if (ack.config != null)
 				{
@@ -242,6 +249,26 @@ public class XPTempoPlugin extends Plugin
 					}
 				}
 				log.debug("XPTempo: batch {} accepted={} duplicates={}", ack.batchId, ack.accepted, ack.duplicates);
+				// The notice belongs to the character in the acknowledged batch, not whoever is logged in now.
+				long hash = parseHash(sent);
+				if ("account_unlinked".equals(ack.notice))
+				{
+					if (hash != -1L && unlinkedHashes.add(hash))
+					{
+						chat("XPTempo: a character on this profile was unlinked in the XPTempo app, so it is no longer synced. To track it again, clear the API key in the XPTempo settings and paste a new pairing code.");
+					}
+				}
+				else if (sent.sessionId != null)
+				{
+					// Only now has this session reached the server (so a session_end is owed if uploads stop).
+					clientThread.invoke(() ->
+					{
+						if (sent.sessionId.equals(sessionId))
+						{
+							sessionUploaded = true;
+						}
+					});
+				}
 			}
 
 			@Override
@@ -250,6 +277,7 @@ public class XPTempoPlugin extends Plugin
 				// A rejected key is useless and would block the next pairing attempt, so forget it here.
 				configManager.setConfiguration(XPTempoConfig.GROUP, XPTempoConfig.KEY_API_KEY, "");
 				chat("XPTempo: the server rejected this client's key, so it was cleared. Get a pairing code from xptempo.com and paste it into the plugin settings.");
+				maybePair(); // a code that was waiting can be used now
 			}
 
 			@Override
@@ -279,7 +307,14 @@ public class XPTempoPlugin extends Plugin
 	@Override
 	protected void shutDown()
 	{
-		clientThread.invoke(() -> endSession("PLUGIN_DISABLED"));
+		// Turning the plugin off is an opt-out: drop what is not uploaded yet, send only the session_end, then stop
+		// this instance's retries for good (startUp makes a new one).
+		XPTempoApi current = api;
+		clientThread.invoke(() ->
+		{
+			stopUploads();
+			current.flush().whenComplete((v, e) -> current.close());
+		});
 		initTicks = -1;
 	}
 
@@ -457,9 +492,9 @@ public class XPTempoPlugin extends Plugin
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
 		ContainerTracker.Kind kind = kindOf(event.getContainerId());
-		if (kind == null || sessionId == null)
+		if (kind == null || initTicks != 0 || sessionId == null)
 		{
-			return;
+			return; // during the login/hop window seed() re-reads the containers (or skips the world entirely)
 		}
 		offerContainer(kind, event.getItemContainer());
 	}
@@ -536,13 +571,17 @@ public class XPTempoPlugin extends Plugin
 		{
 			geOpen = true;
 		}
-		else if (event.getGroupId() == InterfaceID.COLLECTION || event.getGroupId() == InterfaceID.COLLECTION_OVERVIEW)
+		else if (event.getGroupId() == InterfaceID.COLLECTION)
 		{
-			readCounts(event.getGroupId(), "COLLECTION_LOG");
+			readCounts("COLLECTION_LOG", InterfaceID.Collection.FRAME, InterfaceID.Collection.HEADER, InterfaceID.Collection.CONTENT);
+		}
+		else if (event.getGroupId() == InterfaceID.COLLECTION_OVERVIEW)
+		{
+			readCounts("COLLECTION_LOG", InterfaceID.CollectionOverview.INFINITY, InterfaceID.CollectionOverview.UNIVERSE, InterfaceID.CollectionOverview.CONTENT);
 		}
 		else if (event.getGroupId() == InterfaceID.CA_OVERVIEW)
 		{
-			readCounts(event.getGroupId(), "COMBAT_ACHIEVEMENTS");
+			readCounts("COMBAT_ACHIEVEMENTS", InterfaceID.CaOverview.INFINITY, InterfaceID.CaOverview.UNIVERSE, InterfaceID.CaOverview.CA_GENERAL_CONTENT);
 		}
 	}
 
@@ -558,7 +597,8 @@ public class XPTempoPlugin extends Plugin
 	@Subscribe
 	public void onPlayerLootReceived(PlayerLootReceived event)
 	{
-		addLoot(event.getPlayer().getName(), "PLAYER", event.getPlayer().getCombatLevel(), event.getItems());
+		// Nothing about other players leaves the client: PvP loot is sent without the victim's name or level.
+		addLoot("Player kill", "PLAYER", 0, event.getItems());
 	}
 
 	@Subscribe
@@ -595,7 +635,8 @@ public class XPTempoPlugin extends Plugin
 			"sourceType", sourceType,
 			"combatLevel", Math.max(0, combatLevel),
 			"items", rows));
-		urgent = true;
+		// Not urgent: drops ride the next regular upload (at most a minute), so fast kills or pickpocketing
+		// never turn into a request every few seconds.
 	}
 
 	@Subscribe
@@ -619,8 +660,11 @@ public class XPTempoPlugin extends Plugin
 		}
 	}
 
-	/** One tick after an overview opens, send the texts it shows ("734/1,590", "Points: 300/2,000") for the server to parse. */
-	private void readCounts(int groupId, String name)
+	/**
+	 * One tick after an overview opens, send the texts it shows ("734/1,590", "Points: 300/2,000") for the server to
+	 * parse, walking down from the interface's root components (gameval component ids).
+	 */
+	private void readCounts(String name, int... roots)
 	{
 		if (sessionId == null || !config.uploadLoot())
 		{
@@ -629,9 +673,9 @@ public class XPTempoPlugin extends Plugin
 		clientThread.invokeLater(() ->
 		{
 			List<String> texts = new ArrayList<>();
-			for (int child = 0; child < 60 && texts.size() < 40; child++)
+			for (int root : roots)
 			{
-				collectTexts(client.getWidget(groupId, child), texts, 0);
+				collectTexts(client.getWidget(root), texts, 0);
 			}
 			if (!texts.isEmpty())
 			{
@@ -643,7 +687,7 @@ public class XPTempoPlugin extends Plugin
 
 	private static void collectTexts(Widget w, List<String> out, int depth)
 	{
-		if (w == null || depth > 4 || out.size() >= 40)
+		if (w == null || depth > 7 || out.size() >= 40)
 		{
 			return;
 		}
@@ -692,20 +736,21 @@ public class XPTempoPlugin extends Plugin
 	public void onGrandExchangeOfferChanged(GrandExchangeOfferChanged event)
 	{
 		// The login burst (EMPTY ×8, then the real offers) lands inside the init guard; seed() replays the slots.
-		if (initTicks != 0 || sessionId == null || !config.uploadGe())
+		// While uploads are off the tracker must not move on, or offers that fill meanwhile would never be reported.
+		if (initTicks != 0 || sessionId == null || !config.uploadGe() || !uploading())
 		{
 			return;
 		}
-		handleOffer(event.getSlot(), event.getOffer(), System.currentTimeMillis());
+		handleOffer(event.getSlot(), event.getOffer(), System.currentTimeMillis(), false);
 	}
 
-	private void handleOffer(int slot, GrandExchangeOffer offer, long now)
+	private void handleOffer(int slot, GrandExchangeOffer offer, long now, boolean force)
 	{
 		if (offer == null)
 		{
 			return;
 		}
-		Map<String, Object> fields = geOffers.onOffer(slot, offer);
+		Map<String, Object> fields = geOffers.onOffer(slot, offer, force);
 		if (fields != null)
 		{
 			Map<String, Object> ev = event("ge_offer", now);
@@ -727,7 +772,6 @@ public class XPTempoPlugin extends Plugin
 		}
 		long now = System.currentTimeMillis();
 		Map<String, Object> data = new LinkedHashMap<>();
-		data.put("regionId", regionId(local));
 		data.put("world", world);
 		data.put("hardcore", accountType.startsWith("HARDCORE"));
 		pendingEvents.add(event("event", now,
@@ -763,9 +807,16 @@ public class XPTempoPlugin extends Plugin
 	@Subscribe
 	public void onClientShutdown(ClientShutdown event)
 	{
-		// Posted on the EDT while the client closes. The final batch is built from plugin state only.
-		endSession("CLIENT_SHUTDOWN");
-		event.waitFor(api.flush());
+		// Posted on the EDT while the client closes: build the final batch on the client thread (like every
+		// other batch), then let the client wait for the upload, which never waits through a retry window.
+		XPTempoApi current = api;
+		CompletableFuture<Void> done = new CompletableFuture<>();
+		clientThread.invoke(() ->
+		{
+			endSession("CLIENT_SHUTDOWN");
+			current.flush().whenComplete((v, e) -> done.complete(null));
+		});
+		event.waitFor(done);
 	}
 
 	@Subscribe
@@ -776,9 +827,17 @@ public class XPTempoPlugin extends Plugin
 			return;
 		}
 		api.configure(XPTempoApi.baseUrl(), config.apiKey());
+		if (XPTempoConfig.KEY_API_KEY.equals(event.getKey()))
+		{
+			unlinkedHashes.clear(); // a new pairing may link an unlinked character back
+		}
 		if (XPTempoConfig.KEY_PAIRING_CODE.equals(event.getKey()))
 		{
 			maybePair();
+		}
+		if (XPTempoConfig.KEY_ENABLED.equals(event.getKey()) && config.enabled())
+		{
+			maybePair(); // a code pasted before switching on is used now
 		}
 		if (XPTempoConfig.KEY_ENABLED.equals(event.getKey()) || XPTempoConfig.KEY_API_KEY.equals(event.getKey()))
 		{
@@ -792,10 +851,54 @@ public class XPTempoPlugin extends Plugin
 				}
 				else if (!config.enabled())
 				{
-					endSession("PLUGIN_DISABLED");
+					stopUploads();
 				}
 			});
 		}
+		dropSwitchedOffCategory(event.getKey());
+	}
+
+	/** A category switch was turned off: what is waiting for it is dropped, not uploaded. */
+	private void dropSwitchedOffCategory(String key)
+	{
+		List<String> types = new ArrayList<>();
+		List<ContainerTracker.Kind> kinds = new ArrayList<>();
+		if ("uploadInventory".equals(key) && !config.uploadInventory())
+		{
+			kinds.add(ContainerTracker.Kind.INVENTORY);
+			kinds.add(ContainerTracker.Kind.EQUIPMENT);
+		}
+		else if ("uploadBank".equals(key) && !config.uploadBank())
+		{
+			kinds.add(ContainerTracker.Kind.BANK);
+		}
+		else if ("uploadGe".equals(key) && !config.uploadGe())
+		{
+			types.add("ge_offer");
+		}
+		else if ("uploadLoot".equals(key) && !config.uploadLoot())
+		{
+			types.add("loot");
+			types.add("kill_count");
+			types.add("counts");
+		}
+		if (types.isEmpty() && kinds.isEmpty())
+		{
+			return;
+		}
+		List<String> kindNames = new ArrayList<>();
+		for (ContainerTracker.Kind k : kinds)
+		{
+			kindNames.add(k.name());
+		}
+		java.util.function.Predicate<Map<String, Object>> withdrawn = ev -> types.contains(String.valueOf(ev.get("type")))
+			|| ("container".equals(ev.get("type")) && kindNames.contains(String.valueOf(ev.get("container"))));
+		clientThread.invoke(() ->
+		{
+			kinds.forEach(containers::forget);
+			pendingEvents.removeIf(withdrawn);
+			api.dropQueuedEvents(withdrawn); // also from batches waiting in the offline queue
+		});
 	}
 
 	/** Runs on the client thread two ticks after login/hop, when XP, the display name and GE slots are reliable. */
@@ -808,25 +911,32 @@ public class XPTempoPlugin extends Plugin
 			initTicks = 1; // try again next tick
 			return;
 		}
+		// Only the normal game: Leagues, Deadman, beta, Quest Speedrunning, PvP Arena and tournament characters
+		// share the main's account hash but are separate characters, so they would overwrite the main's data.
 		EnumSet<WorldType> types = client.getWorldType();
+		RuneScapeProfileType profile = RuneScapeProfileType.getCurrent(client);
+		boolean skipped = profile != RuneScapeProfileType.STANDARD;
 		for (WorldType t : SKIPPED_WORLDS)
 		{
-			if (types.contains(t))
-			{
-				log.debug("XPTempo: not tracking on a {} world", t);
-				endSession("LOGOUT");
-				return;
-			}
+			skipped |= types.contains(t);
+		}
+		if (skipped)
+		{
+			log.debug("XPTempo: not tracking on a {} world {}", profile, types);
+			endSession("LOGOUT");
+			return;
 		}
 		displayName = local.getName();
 		world = client.getWorld();
 		accountType = accountType(client.getVarbitValue(VarbitID.IRONMAN));
 		long now = System.currentTimeMillis();
-		if (hash != accountHash || sessionId == null)
+		boolean newSession = hash != accountHash || sessionId == null;
+		if (newSession)
 		{
 			endSession("LOGOUT"); // a stale session for another character, if any
 			accountHash = hash;
 			sessionId = UUID.randomUUID().toString();
+			sessionUploaded = false;
 			seq = 0;
 			tracker.reset();
 			containers.reset();
@@ -866,14 +976,14 @@ public class XPTempoPlugin extends Plugin
 			offerContainer(ContainerTracker.Kind.INVENTORY, client.getItemContainer(InventoryID.INV));
 			offerContainer(ContainerTracker.Kind.EQUIPMENT, client.getItemContainer(InventoryID.WORN));
 		}
-		if (config.uploadGe())
+		if (config.uploadGe() && uploading())
 		{
 			GrandExchangeOffer[] offers = client.getGrandExchangeOffers();
 			if (offers != null)
 			{
 				for (int slot = 0; slot < offers.length; slot++)
 				{
-					handleOffer(slot, offers[slot], now);
+					handleOffer(slot, offers[slot], now, newSession);
 				}
 			}
 		}
@@ -935,20 +1045,9 @@ public class XPTempoPlugin extends Plugin
 			activity.put("kind", "IDLE");
 			activity.put("label", "Idle");
 		}
-		Player local = client.getLocalPlayer();
-		if (local != null)
-		{
-			activity.put("regionId", regionId(local));
-		}
 		pendingEvents.add(event("heartbeat", now,
 			"xpPerHour", tracker.xpPerHour(now),
 			"activity", activity));
-	}
-
-	private static int regionId(Player local)
-	{
-		WorldPoint wp = local.getWorldLocation();
-		return wp == null ? 0 : wp.getRegionID();
 	}
 
 	private synchronized void endSession(String reason)
@@ -959,9 +1058,14 @@ public class XPTempoPlugin extends Plugin
 		}
 		long now = System.currentTimeMillis();
 		flushXp(now);
+		// Inventory/bank changes still inside their debounce window would otherwise be lost at logout.
+		emitContainer(containers.take(ContainerTracker.Kind.INVENTORY, now, 0, true), now);
+		emitContainer(containers.take(ContainerTracker.Kind.EQUIPMENT, now, 0, true), now);
+		emitContainer(containers.take(ContainerTracker.Kind.BANK, now, 0, true), now);
 		pendingEvents.add(event("session_end", now, "reason", reason));
 		sendBatch();
 		sessionId = null;
+		sessionUploaded = false;
 		bankOpen = false;
 		geOpen = false;
 	}
@@ -973,11 +1077,36 @@ public class XPTempoPlugin extends Plugin
 		{
 			return;
 		}
-		if (!config.enabled() || !api.isConfigured())
+		if (!uploading())
 		{
-			pendingEvents.clear(); // nothing leaves the client until the user opts in and pairs
+			pendingEvents.clear(); // nothing leaves the client until the user opts in and pairs (or for an unlinked character)
 			return;
 		}
+		Payloads.Batch batch = buildBatch(new ArrayList<>(pendingEvents));
+		pendingEvents.clear();
+		api.submit(batch);
+	}
+
+	/** Data can leave the client: the user switched XPTempo on, it is paired, and this character is not unlinked. */
+	private boolean uploading()
+	{
+		return config.enabled() && api.isConfigured() && !unlinkedHashes.contains(accountHash);
+	}
+
+	private static long parseHash(Payloads.Batch batch)
+	{
+		try
+		{
+			return batch.account == null ? -1L : Long.parseLong(batch.account.hash);
+		}
+		catch (NumberFormatException e)
+		{
+			return -1L;
+		}
+	}
+
+	private Payloads.Batch buildBatch(List<Map<String, Object>> events)
+	{
 		Payloads.Batch batch = new Payloads.Batch();
 		batch.batchId = UUID.randomUUID().toString();
 		batch.sentAt = iso(System.currentTimeMillis());
@@ -990,25 +1119,59 @@ public class XPTempoPlugin extends Plugin
 		batch.account.accountType = accountType;
 		batch.account.world = world > 0 ? world : null;
 		batch.sessionId = sessionId;
-		batch.events = new ArrayList<>(pendingEvents);
-		pendingEvents.clear();
-		api.submit(batch);
+		batch.events = events;
+		return batch;
 	}
 
+	/**
+	 * "Enable XPTempo" was switched off: withdraw everything not yet uploaded and send only a session_end,
+	 * so the server closes the session instead of counting it as still playing. Client thread only.
+	 */
+	private synchronized void stopUploads()
+	{
+		pendingEvents.clear();
+		Payloads.Batch last = null;
+		// A session_end only for a session the server knows about; nothing at all if this session never uploaded
+		// (for example a key typed in while uploads are off).
+		if (sessionId != null && sessionUploaded && api.isConfigured())
+		{
+			List<Map<String, Object>> events = new ArrayList<>();
+			events.add(event("session_end", System.currentTimeMillis(), "reason", "PLUGIN_DISABLED"));
+			last = buildBatch(events);
+		}
+		api.discardAllExcept(last);
+		sessionId = null;
+		sessionUploaded = false;
+		bankOpen = false;
+		geOpen = false;
+	}
+
+	/** Exchanges a pasted pairing code for a key. Nothing is sent to the server until "Enable XPTempo" is on. */
 	private void maybePair()
 	{
 		String code = config.pairingCode().trim();
-		if (pairing || code.isEmpty() || !config.apiKey().trim().isEmpty())
+		if (pairing || code.isEmpty())
 		{
 			return;
 		}
+		if (!config.apiKey().trim().isEmpty())
+		{
+			configManager.setConfiguration(XPTempoConfig.GROUP, XPTempoConfig.KEY_PAIRING_CODE, "");
+			chat("XPTempo: this RuneLite profile is already paired. To pair it with another account, clear the API key first.");
+			return;
+		}
+		if (!config.enabled())
+		{
+			chat("XPTempo: turn on \"Enable XPTempo\" to pair with the code you pasted.");
+			return;
+		}
 		pairing = true;
-		api.pair(code, "RuneLite on " + System.getProperty("os.name"), response ->
+		api.pair(code, "RuneLite", response ->
 		{
 			configManager.setConfiguration(XPTempoConfig.GROUP, XPTempoConfig.KEY_API_KEY, response.apiKey);
 			configManager.setConfiguration(XPTempoConfig.GROUP, XPTempoConfig.KEY_PAIRING_CODE, "");
 			pairing = false;
-			chat("XPTempo: paired with " + response.userEmail + ". Turn on \"Enable XPTempo\" to start uploading.");
+			chat("XPTempo: paired with your XPTempo account. Every character you play on this RuneLite profile will sync to it.");
 		}, error ->
 		{
 			pairing = false;
@@ -1018,7 +1181,7 @@ public class XPTempoPlugin extends Plugin
 
 	private void chat(String message)
 	{
-		log.info(message);
+		log.debug(message);
 		clientThread.invoke(() ->
 		{
 			if (client.getGameState() == GameState.LOGGED_IN)

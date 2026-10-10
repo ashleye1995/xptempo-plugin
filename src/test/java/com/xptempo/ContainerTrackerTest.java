@@ -45,4 +45,27 @@ public class ContainerTrackerTest
 		assertNotNull(t.take(Kind.INVENTORY, 30_000, 60_000, true)); // forced (bank close)
 		assertNull(t.take(Kind.INVENTORY, 61_001, 60_000, false));   // nothing pending any more
 	}
+
+	@Test
+	public void itemIdsThatShareTheirLowByteHashDifferently()
+	{
+		// 861 (magic shortbow) and 1373 (rune battleaxe) are both 0x5D in their low byte.
+		ContainerTracker.Snapshot a = ContainerTracker.snapshot(ContainerTracker.Kind.INVENTORY, new int[]{861}, new int[]{1});
+		ContainerTracker.Snapshot b = ContainerTracker.snapshot(ContainerTracker.Kind.INVENTORY, new int[]{1373}, new int[]{1});
+		org.junit.Assert.assertNotEquals(a.hash, b.hash);
+	}
+
+	@Test
+	public void forgettingACategoryDropsItsPendingSnapshotAndResendsLater()
+	{
+		ContainerTracker t = new ContainerTracker();
+		ContainerTracker.Snapshot s = ContainerTracker.snapshot(ContainerTracker.Kind.BANK, new int[]{995}, new int[]{100});
+		t.offer(s);
+		org.junit.Assert.assertNotNull(t.take(ContainerTracker.Kind.BANK, 0, 0, true));
+		t.offer(s);
+		org.junit.Assert.assertFalse(t.hasPending(ContainerTracker.Kind.BANK)); // unchanged, nothing to send
+		t.forget(ContainerTracker.Kind.BANK);
+		t.offer(s);
+		org.junit.Assert.assertTrue(t.hasPending(ContainerTracker.Kind.BANK)); // after a switch-off, a fresh snapshot goes again
+	}
 }

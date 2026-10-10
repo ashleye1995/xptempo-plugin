@@ -55,7 +55,11 @@ public final class ContainerTracker
 		{
 			int qty = (int) Math.min(Integer.MAX_VALUE, e.getValue());
 			items.add(new int[]{e.getKey(), qty});
-			crc.update(e.getKey());
+			int id = e.getKey();
+			crc.update(id); // CRC32.update(int) takes only the low byte, so feed all four bytes of id and quantity
+			crc.update(id >>> 8);
+			crc.update(id >>> 16);
+			crc.update(id >>> 24);
 			crc.update(qty);
 			crc.update(qty >>> 8);
 			crc.update(qty >>> 16);
@@ -102,6 +106,14 @@ public final class ContainerTracker
 		lastSentMs.put(kind, nowMs);
 		lastSentHash.put(kind, s.hash);
 		return s;
+	}
+
+	/** A category was switched off: drop what is waiting, and send a full snapshot if it is switched on again. */
+	public void forget(Kind kind)
+	{
+		pending.remove(kind);
+		lastSentHash.remove(kind);
+		lastSentMs.remove(kind);
 	}
 
 	/** Forget everything (new character / new session): the server will get full payloads again. */

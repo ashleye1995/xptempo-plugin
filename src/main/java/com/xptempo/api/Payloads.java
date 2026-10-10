@@ -3,7 +3,7 @@ package com.xptempo.api;
 import java.util.List;
 import java.util.Map;
 
-/** JSON shapes of the ingest contract (Vault/research/data-model.md §13), serialised with RuneLite's Gson. */
+/** JSON shapes of the XPTempo ingest API (POST /v1/ingest, POST /v1/pair), serialised with RuneLite's Gson. */
 public final class Payloads
 {
 	private Payloads()
@@ -56,6 +56,8 @@ public final class Payloads
 		public List<Rejection> rejected;
 		public String serverTime;
 		public CadenceConfig config;
+		/** "account_unlinked": the player unlinked this character in the app, so the server stored nothing. */
+		public String notice;
 	}
 
 	public static final class Rejection

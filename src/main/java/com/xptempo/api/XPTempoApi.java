@@ -3,11 +3,17 @@ package com.xptempo.api;
 import com.google.gson.Gson;
 import com.google.gson.JsonSyntaxException;
 import java.io.IOException;
+import java.net.ConnectException;
+import java.net.NoRouteToHostException;
+import java.net.UnknownHostException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.Map;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.Call;
 import okhttp3.Callback;
@@ -22,14 +28,16 @@ import okhttp3.ResponseBody;
 /**
  * HTTP client for the XPTempo API. Every call is asynchronous (OkHttp enqueue) and never runs on the client
  * thread. Batches are sent one at a time in order; failures retry the same batch (same batchId, so the server
- * can deduplicate) with exponential back-off from 5 s to 5 min.
+ * can deduplicate) with exponential back-off from 5 s to 5 min plus jitter. There is only ever one retry timer,
+ * new batches wait for it, and a backlog is sent at a gentle pace once the server answers again.
  */
 @Slf4j
 public final class XPTempoApi
 {
 	public interface Listener
 	{
-		void onAck(Payloads.Ack ack);
+		/** The server answered for this batch; `sent` is the batch the ack belongs to. */
+		void onAck(Payloads.Batch sent, Payloads.Ack ack);
 
 		void onUnauthorized();
 
@@ -39,6 +47,8 @@ public final class XPTempoApi
 	private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
 	private static final long BASE_BACKOFF_MS = 5_000L;
 	private static final long MAX_BACKOFF_MS = 300_000L;
+	/** Gap between batches while catching up on a backlog, so recovering servers are not flooded. */
+	private static final long BACKLOG_GAP_MS = 750L;
 
 	private final OkHttpClient http;
 	private final Gson gson;
@@ -50,8 +60,15 @@ public final class XPTempoApi
 	private volatile HttpUrl baseUrl;
 	private volatile String apiKey = "";
 	private volatile boolean paused;
+	private volatile boolean closed;
 	private boolean sending;
 	private int failures;
+	/**
+	 * No send before this time (the single retry timer, or the pause between backlog batches). Monotonic, on the
+	 * same clock as the executor's timer, so a wall-clock adjustment can never strand a wake-up.
+	 */
+	private long notBeforeMs;
+	private ScheduledFuture<?> wakeUp;
 	private CompletableFuture<Void> drained;
 
 	public XPTempoApi(OkHttpClient base, Gson gson, ScheduledExecutorService executor, String userAgent, Listener listener)
@@ -64,19 +81,23 @@ public final class XPTempoApi
 		this.listener = listener;
 	}
 
-	/** Called at start-up and whenever the config changes. A new key un-pauses sending after a 401. */
 	/** Where every player's plugin sends data. Fixed: the service lives at api.xptempo.com. */
 	public static final String PRODUCTION_BASE_URL = "https://api.xptempo.com";
 
 	/**
-	 * The production address, unless a developer launched the client with -Dxptempo.api=http://127.0.0.1:3000
-	 * (the Gradle run task forwards the XPTEMPO_API environment variable as that property).
+	 * The production address. A developer running the plugin from source can point it at an API on their own
+	 * machine with -Dxptempo.api=http://127.0.0.1:3000; any other host is ignored, so data only ever goes to
+	 * api.xptempo.com or the developer's own computer.
 	 */
 	public static String baseUrl()
 	{
 		String override = System.getProperty("xptempo.api");
-		return override == null || override.trim().isEmpty() ? PRODUCTION_BASE_URL : override.trim();
+		HttpUrl url = override == null ? null : HttpUrl.parse(override.trim());
+		boolean local = url != null && ("127.0.0.1".equals(url.host()) || "localhost".equals(url.host()));
+		return local ? url.toString() : PRODUCTION_BASE_URL;
 	}
+
+	/** Called at start-up and whenever the config changes. A new key un-pauses sending after a 401. */
 
 	public void configure(String baseUrlText, String apiKey)
 	{
@@ -151,8 +172,49 @@ public final class XPTempoApi
 
 	public void submit(Payloads.Batch batch)
 	{
+		if (closed)
+		{
+			return;
+		}
 		queue.add(batch);
 		executor.execute(this::sendNext);
+	}
+
+	/**
+	 * Uploads were switched off: forget everything not yet sent and send only this last batch (the
+	 * session_end), so the server stops counting the session. Null just clears the queue.
+	 */
+	public void discardAllExcept(Payloads.Batch last)
+	{
+		queue.clear();
+		if (last != null)
+		{
+			submit(last);
+		}
+	}
+
+	/** A category was switched off: its events leave every queued batch that has not been attempted yet. */
+	public void dropQueuedEvents(Predicate<Map<String, Object>> drop)
+	{
+		queue.removeEvents(drop);
+	}
+
+	/** The plugin is shutting down: stop retrying, drop the queue, ignore further submissions. */
+	public void close()
+	{
+		ScheduledFuture<?> timer;
+		synchronized (this)
+		{
+			closed = true;
+			timer = wakeUp;
+			wakeUp = null;
+		}
+		if (timer != null)
+		{
+			timer.cancel(false);
+		}
+		queue.clear();
+		completeDrainedIfIdle();
 	}
 
 	/** For ClientShutdown: completes when the queue is empty, paused, or the next attempt fails. */
@@ -173,12 +235,30 @@ public final class XPTempoApi
 		Request request;
 		synchronized (this)
 		{
-			if (sending || paused || queue.isEmpty() || !isConfigured())
+			if (closed || sending || paused || queue.isEmpty() || !isConfigured())
 			{
 				completeDrainedIfIdle();
 				return;
 			}
-			batch = queue.peek();
+			long wait = notBeforeMs - nowMs();
+			// While the client waits to shut down, a backlog goes out without the pacing gap (but never early in a back-off).
+			if (wait > 0 && !(failures == 0 && drained != null))
+			{
+				// Backing off or pacing: one timer wakes the queue, new batches just wait for it.
+				schedule(wait);
+				if (failures > 0 && drained != null)
+				{
+					drained.complete(null); // never hold the client's shutdown for a retry window
+					drained = null;
+				}
+				return;
+			}
+			batch = queue.take();
+			if (batch == null)
+			{
+				completeDrainedIfIdle(); // emptied by an opt-out between the checks
+				return;
+			}
 			request = new Request.Builder()
 				.url(baseUrl.newBuilder().addPathSegments("v1/ingest").build())
 				.header("Authorization", "Bearer " + apiKey)
@@ -192,9 +272,15 @@ public final class XPTempoApi
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
-				synchronized (XPTempoApi.this)
+				// No connection was made, so the server cannot have applied it: it may be changed or merged again.
+				boolean neverArrived = e instanceof ConnectException || e instanceof UnknownHostException || e instanceof NoRouteToHostException;
+				if (neverArrived)
 				{
-					sending = false;
+					queue.notApplied(batch);
+				}
+				else
+				{
+					queue.release(batch);
 				}
 				scheduleRetry("network error: " + e.getMessage(), -1);
 			}
@@ -224,37 +310,37 @@ public final class XPTempoApi
 				}
 				catch (IOException e)
 				{
-					synchronized (XPTempoApi.this)
-					{
-						sending = false;
-					}
+					queue.release(batch);
 					scheduleRetry("could not read response: " + e.getMessage(), -1);
 					return;
-				}
-				synchronized (XPTempoApi.this)
-				{
-					sending = false;
 				}
 				handleResponse(batch, code, text, retryAfterMs);
 			}
 		});
 	}
 
+	/** Every branch clears `sending` in the same locked step that records the outcome, so no send can slip in between. */
 	private void handleResponse(Payloads.Batch batch, int code, String text, long retryAfterMs)
 	{
 		if (code >= 200 && code < 300)
 		{
+			boolean moreAfter = queue.size() > 1;
 			queue.removeHead(batch);
 			synchronized (this)
 			{
+				sending = false;
+				// Catching up after an outage: space the backlog out (with jitter) instead of sending it all at once,
+				// unless the client is waiting to shut down.
+				boolean pace = (failures > 0 || moreAfter) && !queue.isEmpty() && drained == null;
 				failures = 0;
+				notBeforeMs = pace ? nowMs() + BACKLOG_GAP_MS + ThreadLocalRandom.current().nextLong(BACKLOG_GAP_MS) : 0;
 			}
 			try
 			{
 				Payloads.Ack ack = gson.fromJson(text, Payloads.Ack.class);
 				if (ack != null)
 				{
-					listener.onAck(ack);
+					listener.onAck(batch, ack);
 				}
 			}
 			catch (JsonSyntaxException e)
@@ -266,13 +352,22 @@ public final class XPTempoApi
 		}
 		if (code == 401)
 		{
-			paused = true;
+			queue.release(batch);
+			synchronized (this)
+			{
+				sending = false;
+				paused = true;
+			}
 			listener.onUnauthorized();
 			completeDrainedIfIdle();
 			return;
 		}
 		if (code == 413)
 		{
+			synchronized (this)
+			{
+				sending = false;
+			}
 			if (!queue.splitHead(batch))
 			{
 				queue.removeHead(batch);
@@ -283,10 +378,22 @@ public final class XPTempoApi
 		}
 		if (code == 429 || code >= 500)
 		{
+			if (code == 429 || code == 503)
+			{
+				queue.notApplied(batch); // refused before anything was applied
+			}
+			else
+			{
+				queue.release(batch);
+			}
 			scheduleRetry(errorMessage(code, text), retryAfterMs);
 			return;
 		}
 		// Any other 4xx: the batch itself is unacceptable; drop it rather than block the queue forever.
+		synchronized (this)
+		{
+			sending = false;
+		}
 		queue.removeHead(batch);
 		listener.onFailure(errorMessage(code, text) + "; batch dropped", false);
 		executor.execute(this::sendNext);
@@ -297,14 +404,18 @@ public final class XPTempoApi
 		long delay;
 		synchronized (this)
 		{
+			sending = false;
+			if (closed)
+			{
+				return;
+			}
 			failures++;
 			int shift = Math.min(failures - 1, 6);
-			delay = Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS << shift);
-			delay += ThreadLocalRandom.current().nextLong(delay / 4 + 1);
-			if (retryAfterMs > 0)
-			{
-				delay = Math.min(MAX_BACKOFF_MS, retryAfterMs);
-			}
+			long base = retryAfterMs > 0 ? Math.min(MAX_BACKOFF_MS, retryAfterMs) : Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS << shift);
+			// Jitter on top (also of Retry-After), so thousands of clients do not come back in the same second.
+			delay = base + ThreadLocalRandom.current().nextLong(base / 4 + 1);
+			notBeforeMs = nowMs() + delay;
+			schedule(delay);
 			// Never hold the client's shutdown hook for a retry window.
 			if (drained != null)
 			{
@@ -313,7 +424,42 @@ public final class XPTempoApi
 			}
 		}
 		listener.onFailure(message + " (retrying in " + (delay / 1000) + " s)", true);
-		executor.schedule(this::sendNext, delay, TimeUnit.MILLISECONDS);
+	}
+
+	/** Arms the single wake-up timer (replacing an earlier, later one). Caller holds the lock. */
+	private void schedule(long delayMs)
+	{
+		if (closed)
+		{
+			return;
+		}
+		if (wakeUp != null && !wakeUp.isDone())
+		{
+			long remaining = wakeUp.getDelay(TimeUnit.MILLISECONDS);
+			if (remaining > 0 && remaining <= delayMs)
+			{
+				return; // an earlier wake-up is already armed (a timer that is firing right now does not count)
+			}
+			wakeUp.cancel(false);
+		}
+		ScheduledFuture<?>[] self = new ScheduledFuture<?>[1];
+		self[0] = executor.schedule(() ->
+		{
+			synchronized (XPTempoApi.this)
+			{
+				if (wakeUp == self[0])
+				{
+					wakeUp = null;
+				}
+			}
+			sendNext();
+		}, delayMs, TimeUnit.MILLISECONDS);
+		wakeUp = self[0];
+	}
+
+	private static long nowMs()
+	{
+		return System.nanoTime() / 1_000_000L;
 	}
 
 	private void completeDrainedIfIdle()
@@ -321,7 +467,7 @@ public final class XPTempoApi
 		CompletableFuture<Void> toComplete = null;
 		synchronized (this)
 		{
-			if (drained != null && (queue.isEmpty() || paused || !isConfigured()))
+			if (drained != null && (closed || queue.isEmpty() || paused || !isConfigured()))
 			{
 				toComplete = drained;
 				drained = null;

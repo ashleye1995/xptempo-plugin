@@ -129,4 +129,19 @@ public class GeOfferTrackerTest
 		assertEquals("CANCELLED", emptied.get("state"));
 		assertEquals(true, emptied.get("collected"));
 	}
+
+	@Test
+	public void aNewSessionResendsUnchangedOpenOffers()
+	{
+		MemoryStore store = new MemoryStore();
+		AtomicInteger ids = new AtomicInteger();
+		GeOfferTracker t = new GeOfferTracker(store, () -> "id-" + ids.incrementAndGet());
+		GrandExchangeOffer buying = offer(GrandExchangeOfferState.BUYING, 4151, 1_500_000, 1, 0, 0);
+		assertNotNull(t.onOffer(0, buying));
+		assertNull(t.onOffer(0, buying)); // unchanged: not sent again
+		Map<String, Object> forced = t.onOffer(0, buying, true);
+		assertNotNull(forced); // a new session sends it anyway, with the same id
+		assertEquals("id-1", forced.get("clientOfferId"));
+		assertNull(t.onOffer(1, offer(GrandExchangeOfferState.EMPTY, 0, 0, 0, 0, 0), true)); // empty slots stay quiet
+	}
 }
