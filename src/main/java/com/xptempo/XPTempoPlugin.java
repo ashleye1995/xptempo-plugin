@@ -734,7 +734,7 @@ public class XPTempoPlugin extends Plugin
 			configManager.setConfiguration(XPTempoConfig.GROUP, XPTempoConfig.KEY_API_KEY, response.apiKey);
 			configManager.setConfiguration(XPTempoConfig.GROUP, XPTempoConfig.KEY_PAIRING_CODE, "");
 			pairing = false;
-			chat("XPTempo: paired with " + response.userEmail + ". Enable \"Send data to XPTempo\" to start uploading.");
+			chat("XPTempo: paired with " + response.userEmail + ". Turn on \"Enable XPTempo\" to start uploading.");
 		}, error ->
 		{
 			pairing = false;

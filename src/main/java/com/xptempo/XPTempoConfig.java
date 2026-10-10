@@ -15,9 +15,9 @@ public interface XPTempoConfig extends Config
 
 	@ConfigItem(
 		keyName = KEY_ENABLED,
-		name = "Send data to XPTempo",
-		description = "Uploads your own character's skills and XP, activity and session time to your XPTempo account. Nothing is sent until you pair.",
-		warning = "This sends your character's data (skills and XP, activity, session time; later bank, inventory and GE offers) and your IP address to XPTempo's servers, which are not run or verified by RuneLite developers.",
+		name = "Enable XPTempo",
+		description = "Sends your own character's skills and XP, activity and session time, bank, inventory, worn items and Grand Exchange offers to your XPTempo account. Nothing is sent until you pair.",
+		warning = "Enabling XPTempo sends your character's data (skills and XP, activity and session time, bank, inventory, worn items and Grand Exchange offers) and your IP address to XPTempo's servers at api.xptempo.com, which are not run or verified by the RuneLite developers. Nothing is sent until you pair the plugin with your account, and you can turn this off at any time.",
 		position = 0
 	)
 	default boolean enabled()

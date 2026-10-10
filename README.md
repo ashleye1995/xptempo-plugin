@@ -22,7 +22,7 @@ once (launch via the Jagex launcher with `--insecure-write-credentials`).
 1. Run the API locally (`../API`, `npm run dev`) and get a pairing code (`npm run seed:dev`, or later from the app).
 2. In RuneLite: Configuration → XPTempo → paste the code into **Pairing code**. The plugin exchanges it for an API key,
    stores the key in the **API key** field and clears the code. A chat message confirms the pairing.
-3. Tick **Send data to XPTempo** (the warning explains exactly what is sent).
+3. Tick **Enable XPTempo** (the warning box explains exactly what is sent).
 
 The plugin always talks to `https://api.xptempo.com`; there is no URL setting. To develop against a local API, run the dev client with `XPTEMPO_API=http://127.0.0.1:3000 ./gradlew run`.
 
