@@ -432,7 +432,7 @@ public class XPTempoPlugin extends Plugin
 		SyncGuide.Step step = guide.current(config.uploadBank(), config.uploadLoot());
 		if (step == SyncGuide.Step.COMBAT_ACHIEVEMENTS)
 		{
-			return pathToSummaryRow("Combat tasks", "Combat achievements");
+			return pathToSummaryRow(new String[]{"Tasks", "Bosses", "Rewards"}, "Combat tasks");
 		}
 		if (step != SyncGuide.Step.COLLECTION_LOG)
 		{
@@ -440,7 +440,7 @@ public class XPTempoPlugin extends Plugin
 		}
 		if (!visible(client.getWidget(InterfaceID.Collection.FRAME)))
 		{
-			return pathToSummaryRow("Collections logged", "Collection Log");
+			return pathToSummaryRow(new String[]{"Collection Log"}, "Collections logged");
 		}
 		String next = guide.nextCategory();
 		int active = activeClogTab();
@@ -470,29 +470,29 @@ public class XPTempoPlugin extends Plugin
 	}
 
 	/**
-	 * Journal side tab, then its Character Summary sub-tab, then the row itself. Row labels as the game shows them
-	 * (2026-10-11): "Combat tasks completed: 22/655" and "Collections logged: 81/1717"; any label given may match.
+	 * Journal side tab, then its Character Summary sub-tab, then the row itself. Each summary row has a clickable
+	 * box in the panel's click layer, recognised by its menu options (2026-10-11: combat tasks = Overview / Bosses /
+	 * Tasks / Rewards, collection log = Collection Log / Collection Overview); outlining that box gives exactly one
+	 * row. The row's label ("Combat tasks completed:", "Collections logged:") is the fallback.
 	 */
-	private Rectangle pathToSummaryRow(String... labels)
+	private Rectangle pathToSummaryRow(String[] actions, String label)
 	{
-		String row = labels[0];
 		Widget summary = client.getWidget(InterfaceID.AccountSummarySidepanel.SUMMARY_CONTENTS);
-		if (visible(summary))
+		Widget clickLayer = client.getWidget(InterfaceID.AccountSummarySidepanel.SUMMARY_CLICK_LAYER);
+		boolean summaryShown = (summary != null && !summary.isHidden()) || (clickLayer != null && !clickLayer.isHidden());
+		if (summaryShown)
 		{
-			// The row's label can be split over lines, so match loosely, on its text or its click options, anywhere
-			// in the summary (its click layer holds the clickable rows).
-			Widget hit = null;
-			for (String label : labels)
+			Widget row = rowWithAction(clickLayer, actions);
+			if (row != null)
 			{
-				hit = hit != null ? hit : findText(summary, label, 0);
-				hit = hit != null ? hit : findText(client.getWidget(InterfaceID.AccountSummarySidepanel.SUMMARY_CLICK_LAYER), label, 0);
+				return row.getBounds();
 			}
-			if (hit != null)
+			Widget text = findText(summary, label, 0);
+			if (text != null)
 			{
-				Rectangle r = hit.getBounds();
-				return new Rectangle(summary.getBounds().x, r.y - 2, summary.getBounds().width, r.height + 4);
+				return text.getBounds();
 			}
-			logSummaryOnce(row);
+			logSummaryOnce(label);
 			return null;
 		}
 		if (visible(client.getWidget(InterfaceID.SideJournal.UNIVERSE)))
@@ -506,6 +506,33 @@ public class XPTempoPlugin extends Plugin
 			if (visible(w))
 			{
 				return w.getBounds();
+			}
+		}
+		return null;
+	}
+
+	/** The click-layer row whose menu options include one of these, exactly (case-insensitive). */
+	private static Widget rowWithAction(Widget layer, String[] wanted)
+	{
+		if (layer == null)
+		{
+			return null;
+		}
+		for (Widget[] group : new Widget[][]{layer.getDynamicChildren(), layer.getStaticChildren()})
+		{
+			for (Widget w : group == null ? new Widget[0] : group)
+			{
+				String[] actions = w == null || w.isHidden() ? null : w.getActions();
+				for (String a : actions == null ? new String[0] : actions)
+				{
+					for (String want : wanted)
+					{
+						if (a != null && Text.removeTags(a).trim().equalsIgnoreCase(want) && w.getBounds() != null && w.getBounds().height > 0)
+						{
+							return w;
+						}
+					}
+				}
 			}
 		}
 		return null;
