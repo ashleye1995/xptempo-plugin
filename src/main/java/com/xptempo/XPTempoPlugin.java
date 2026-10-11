@@ -475,12 +475,23 @@ public class XPTempoPlugin extends Plugin
 		Widget summary = client.getWidget(InterfaceID.AccountSummarySidepanel.SUMMARY_CONTENTS);
 		if (visible(summary))
 		{
+			// The row's label can be split over lines, so match loosely, on its text or its click options, anywhere
+			// in the summary (its click layer holds the clickable rows).
 			Widget hit = findText(summary, row, 0);
+			if (hit == null)
+			{
+				hit = findText(client.getWidget(InterfaceID.AccountSummarySidepanel.SUMMARY_CLICK_LAYER), row, 0);
+			}
+			if (hit == null)
+			{
+				hit = findText(client.getWidget(InterfaceID.AccountSummarySidepanel.UNIVERSE), row, 0);
+			}
 			if (hit != null)
 			{
 				Rectangle r = hit.getBounds();
 				return new Rectangle(summary.getBounds().x, r.y - 2, summary.getBounds().width, r.height + 4);
 			}
+			logSummaryOnce(row);
 			return null;
 		}
 		if (visible(client.getWidget(InterfaceID.SideJournal.UNIVERSE)))
@@ -499,13 +510,26 @@ public class XPTempoPlugin extends Plugin
 		return null;
 	}
 
+	/** Lower case, line breaks as spaces, tags removed, spaces collapsed: "Combat<br>Achievements" matches. */
+	private static String plain(String t)
+	{
+		return t == null ? "" : Text.removeTags(t.replaceAll("(?i)<br>", " ")).replaceAll("\\s+", " ").trim().toLowerCase();
+	}
+
 	private static Widget findText(Widget w, String text, int depth)
 	{
-		if (w == null || depth > 3)
+		if (w == null || depth > 5 || w.isHidden())
 		{
 			return null;
 		}
-		if (w.getText() != null && Text.removeTags(w.getText()).trim().toLowerCase().startsWith(text.toLowerCase()) && !w.isHidden())
+		String want = text.toLowerCase();
+		boolean match = plain(w.getText()).contains(want) || plain(w.getName()).contains(want);
+		String[] actions = w.getActions();
+		for (int i = 0; !match && actions != null && i < actions.length; i++)
+		{
+			match = plain(actions[i]).contains(want);
+		}
+		if (match && w.getBounds() != null && w.getBounds().height > 0)
 		{
 			return w;
 		}
@@ -521,6 +545,44 @@ public class XPTempoPlugin extends Plugin
 			}
 		}
 		return null;
+	}
+
+	private long summaryLoggedAt;
+
+	/** When a Character Summary row can't be found, write what the panel shows to the client log (once a minute). */
+	private void logSummaryOnce(String row)
+	{
+		long now = System.currentTimeMillis();
+		if (now - summaryLoggedAt < 60_000)
+		{
+			return;
+		}
+		summaryLoggedAt = now;
+		List<String> seen = new ArrayList<>();
+		describe(client.getWidget(InterfaceID.AccountSummarySidepanel.UNIVERSE), seen, 0);
+		log.debug("XPTempo: guide could not find \"{}\" in Character Summary: {}", row, seen);
+	}
+
+	private static void describe(Widget w, List<String> out, int depth)
+	{
+		if (w == null || depth > 5 || out.size() > 60)
+		{
+			return;
+		}
+		String t = plain(w.getText());
+		String[] a = w.getActions();
+		if (!t.isEmpty() || (a != null && a.length > 0))
+		{
+			out.add(w.getId() + (w.getIndex() >= 0 ? "[" + w.getIndex() + "]" : "") + (t.isEmpty() ? "" : " text=" + t)
+				+ (a == null ? "" : " actions=" + java.util.Arrays.toString(a)) + (w.isHidden() ? " hidden" : ""));
+		}
+		for (Widget[] group : new Widget[][]{w.getDynamicChildren(), w.getStaticChildren(), w.getNestedChildren()})
+		{
+			for (Widget c : group == null ? new Widget[0] : group)
+			{
+				describe(c, out, depth + 1);
+			}
+		}
 	}
 
 	/** Which collection log tab is showing (its entry list is visible), or -1. */
