@@ -13,10 +13,11 @@ final class GuideIcons
 	static final ImageIcon DONE = draw(Kind.DONE, new Color(0x22, 0xC9, 0x9A));
 	static final ImageIcon CURRENT = draw(Kind.CURRENT, new Color(0x22, 0xC9, 0x9A));
 	static final ImageIcon TODO = draw(Kind.TODO, new Color(0x9A, 0xA4, 0x9F));
+	static final ImageIcon FAILED = draw(Kind.FAILED, new Color(0xE8, 0xA2, 0x3B));
 
 	private enum Kind
 	{
-		DONE, CURRENT, TODO
+		DONE, CURRENT, TODO, FAILED
 	}
 
 	private GuideIcons()
@@ -34,6 +35,10 @@ final class GuideIcons
 		{
 			case DONE:
 				g.drawPolyline(new int[]{2, 5, 10}, new int[]{6, 9, 3}, 3);
+				break;
+			case FAILED:
+				g.drawLine(3, 3, 9, 9);
+				g.drawLine(9, 3, 3, 9);
 				break;
 			case CURRENT:
 				g.fillPolygon(new int[]{3, 10, 3}, new int[]{2, 6, 10}, 3);

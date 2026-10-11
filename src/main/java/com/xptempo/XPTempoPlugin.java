@@ -354,7 +354,7 @@ public class XPTempoPlugin extends Plugin
 			@Override
 			public void onFailure(String message, boolean willRetry)
 			{
-				syncStatus.failed(willRetry ? "Can't reach the XPTempo server right now; retrying." : "Upload failed: " + message);
+				syncStatus.failed(willRetry ? "Can't reach the XPTempo server right now; retrying." : message, System.currentTimeMillis());
 				if (willRetry)
 				{
 					log.debug("XPTempo: {}", message);

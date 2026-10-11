@@ -225,7 +225,19 @@ public class XPTempoPanel extends PluginPanel
 		else
 		{
 			SyncStatus.Snapshot s = info.snapshot;
-			syncRows.add(left(line("Last upload", s.lastUploadAt == 0 ? "not yet" : SyncStatus.ago(s.lastUploadAt, now), Color.WHITE)));
+			// Did the last attempt work? A failure since the last success shows as failed until an upload gets through.
+			if (s.lastFailedAt != 0)
+			{
+				syncRows.add(left(line("Last upload (" + SyncStatus.ago(s.lastFailedAt, now) + ")", "Failed", AMBER, GuideIcons.FAILED)));
+			}
+			else if (s.lastUploadAt != 0)
+			{
+				syncRows.add(left(line("Last upload (" + SyncStatus.ago(s.lastUploadAt, now) + ")", "Successful", ACCENT, GuideIcons.DONE)));
+			}
+			else
+			{
+				syncRows.add(left(line("Last upload", "not yet", ColorScheme.LIGHT_GRAY_COLOR)));
+			}
 			if (info.live)
 			{
 				long in = Math.max(0, (info.nextUploadAt - now) / 1000);
@@ -272,12 +284,22 @@ public class XPTempoPanel extends PluginPanel
 	/** "Label ......... value" on one line. */
 	private static JPanel line(String label, String value, Color valueColor)
 	{
+		return line(label, value, valueColor, null);
+	}
+
+	private static JPanel line(String label, String value, Color valueColor, javax.swing.Icon icon)
+	{
 		JPanel row = new JPanel(new BorderLayout(6, 0));
 		row.setOpaque(false);
 		JLabel l = new JLabel(label);
 		l.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		JLabel v = new JLabel(value);
 		v.setForeground(valueColor);
+		if (icon != null)
+		{
+			v.setIcon(icon);
+			v.setIconTextGap(5);
+		}
 		row.add(l, BorderLayout.WEST);
 		row.add(v, BorderLayout.EAST);
 		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));

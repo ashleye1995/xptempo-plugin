@@ -39,11 +39,13 @@ public class SyncStatusTest
 	public void acceptedUploadsRecordTimesAndClearProblems()
 	{
 		SyncStatus s = new SyncStatus();
-		s.failed("server unreachable");
+		s.failed("server unreachable", 1_000);
 		assertEquals("server unreachable", s.snapshot().problem);
+		assertEquals(1_000, s.snapshot().lastFailedAt);
 		s.accepted(Arrays.asList(ev("xp", null), ev("clog_page", null), ev("clog_page", null), ev("heartbeat", null)), 5_000);
 		SyncStatus.Snapshot snap = s.snapshot();
 		assertNull(snap.problem);
+		assertEquals("a success clears the failure", 0, snap.lastFailedAt);
 		assertEquals(5_000, snap.lastUploadAt);
 		assertEquals(Long.valueOf(5_000), snap.lastSent.get(SyncStatus.Kind.SKILLS));
 		assertFalse(snap.lastSent.containsKey(SyncStatus.Kind.BANK));

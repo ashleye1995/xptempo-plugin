@@ -37,15 +37,18 @@ public final class SyncStatus
 	public static final class Snapshot
 	{
 		public final long lastUploadAt;
+		/** When the last attempt failed (0 if none since the last success). */
+		public final long lastFailedAt;
 		public final String problem;
 		public final Map<Kind, Long> lastSent;
 		public final int clogPages;
 		/** Read in game but not uploaded yet, per kind. */
 		public final Map<Kind, Integer> waiting;
 
-		Snapshot(long lastUploadAt, String problem, Map<Kind, Long> lastSent, int clogPages, Map<Kind, Integer> waiting)
+		Snapshot(long lastUploadAt, long lastFailedAt, String problem, Map<Kind, Long> lastSent, int clogPages, Map<Kind, Integer> waiting)
 		{
 			this.lastUploadAt = lastUploadAt;
+			this.lastFailedAt = lastFailedAt;
 			this.problem = problem;
 			this.lastSent = lastSent;
 			this.clogPages = clogPages;
@@ -54,6 +57,7 @@ public final class SyncStatus
 	}
 
 	private long lastUploadAt;
+	private long lastFailedAt;
 	private String problem;
 	private final EnumMap<Kind, Long> lastSent = new EnumMap<>(Kind.class);
 	private int clogPages;
@@ -109,6 +113,7 @@ public final class SyncStatus
 	public synchronized void accepted(List<Map<String, Object>> events, long now)
 	{
 		lastUploadAt = now;
+		lastFailedAt = 0;
 		problem = null;
 		for (Map<String, Object> e : events == null ? Collections.<Map<String, Object>>emptyList() : events)
 		{
@@ -124,14 +129,15 @@ public final class SyncStatus
 		}
 	}
 
-	public synchronized void failed(String message)
+	public synchronized void failed(String message, long now)
 	{
 		problem = message;
+		lastFailedAt = now;
 	}
 
 	public synchronized Snapshot snapshot()
 	{
-		return new Snapshot(lastUploadAt, problem, new EnumMap<>(lastSent), clogPages, new EnumMap<>(waiting));
+		return new Snapshot(lastUploadAt, lastFailedAt, problem, new EnumMap<>(lastSent), clogPages, new EnumMap<>(waiting));
 	}
 
 	/** "12s ago", "4m ago", "2h ago". */
