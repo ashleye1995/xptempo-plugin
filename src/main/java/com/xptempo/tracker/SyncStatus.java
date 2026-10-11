@@ -14,13 +14,13 @@ public final class SyncStatus
 {
 	public enum Kind
 	{
-		SKILLS("Skills and XP", "when you gain XP"),
-		PROGRESS("Quests, diaries, combat tasks", "at login"),
-		INVENTORY("Inventory and worn items", "when they change"),
-		BANK("Bank", "open your bank"),
-		GE("Grand Exchange offers", "when you have offers"),
-		DROPS("Drops and kill counts", "on your next drop"),
-		COLLECTION_LOG("Collection log", "open the log");
+		SKILLS("XP", "on XP gain"),
+		PROGRESS("Progress", "at login"),
+		INVENTORY("Inventory", "on change"),
+		BANK("Bank", "open bank"),
+		GE("GE offers", "on offers"),
+		DROPS("Drops", "next drop"),
+		COLLECTION_LOG("Collection log", "open log");
 
 		public final String label;
 		/** When it will be sent, for a kind not sent yet. */

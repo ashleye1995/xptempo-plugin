@@ -69,6 +69,9 @@ public class XPTempoPanel extends PluginPanel
 	private final Supplier<SyncInfo> syncInfo;
 	private final JPanel syncRows = new JPanel();
 	private final Timer ticker;
+	/** The per-kind list starts folded; the last/next upload lines always show. */
+	private boolean syncExpanded;
+	private final JButton syncToggle = new JButton();
 
 	private final ConfigManager configManager;
 	private final XPTempoConfig config;
@@ -112,7 +115,13 @@ public class XPTempoPanel extends PluginPanel
 
 		syncRows.setLayout(new BoxLayout(syncRows, BoxLayout.Y_AXIS));
 		syncRows.setOpaque(false);
-		body.add(section("Sync", syncRows));
+		syncToggle.setFocusable(false);
+		syncToggle.addActionListener(e ->
+		{
+			syncExpanded = !syncExpanded;
+			renderSync();
+		});
+		body.add(section("Sync", syncRows, syncToggle));
 		ticker = new Timer(1000, e -> renderSync());
 		ticker.start();
 
@@ -211,6 +220,7 @@ public class XPTempoPanel extends PluginPanel
 		if (!config.enabled() || config.apiKey().trim().isEmpty())
 		{
 			syncRows.add(left(grey("Nothing is sent until uploads are on and this profile is paired.")));
+			syncToggle.setVisible(false);
 		}
 		else
 		{
@@ -232,8 +242,13 @@ public class XPTempoPanel extends PluginPanel
 				syncRows.add(Box.createVerticalStrut(4));
 				syncRows.add(left(p));
 			}
-			syncRows.add(Box.createVerticalStrut(6));
-			for (SyncStatus.Kind k : SyncStatus.Kind.values())
+			syncToggle.setVisible(true);
+			syncToggle.setText(syncExpanded ? "Hide details" : "Show details");
+			if (syncExpanded)
+			{
+				syncRows.add(Box.createVerticalStrut(6));
+			}
+			for (SyncStatus.Kind k : syncExpanded ? SyncStatus.Kind.values() : new SyncStatus.Kind[0])
 			{
 				boolean on = k == SyncStatus.Kind.INVENTORY ? config.uploadInventory()
 					: k == SyncStatus.Kind.BANK ? config.uploadBank()
@@ -243,8 +258,8 @@ public class XPTempoPanel extends PluginPanel
 				Long at = s.lastSent.get(k);
 				int queued = s.waiting.getOrDefault(k, 0);
 				String value = !on ? "off"
-					: queued > 0 ? "waiting to upload (" + queued + ")"
-					: at != null ? SyncStatus.ago(at, now) + (k == SyncStatus.Kind.COLLECTION_LOG && s.clogPages > 0 ? " (" + s.clogPages + " pages)" : "")
+					: queued > 0 ? "waiting (" + queued + ")"
+					: at != null ? SyncStatus.ago(at, now) + (k == SyncStatus.Kind.COLLECTION_LOG && s.clogPages > 0 ? " (" + s.clogPages + ")" : "")
 					: k.hint;
 				Color c = !on ? ColorScheme.LIGHT_GRAY_COLOR : queued > 0 ? Color.WHITE : at != null ? ACCENT : ColorScheme.LIGHT_GRAY_COLOR;
 				syncRows.add(left(line(k.label, value, c)));
