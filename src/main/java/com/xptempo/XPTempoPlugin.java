@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.inject.Provides;
 import com.xptempo.api.Payloads;
 import com.xptempo.api.XPTempoApi;
+import com.xptempo.tracker.CollectionLogReader;
 import com.xptempo.tracker.ContainerTracker;
 import com.xptempo.tracker.GeOfferTracker;
 import com.xptempo.tracker.XpTracker;
@@ -33,6 +34,7 @@ import net.runelite.api.NPC;
 import net.runelite.api.Player;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
+import net.runelite.api.ScriptID;
 import net.runelite.api.Skill;
 import net.runelite.api.WorldType;
 import net.runelite.api.events.ActorDeath;
@@ -42,6 +44,7 @@ import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.api.events.HitsplatApplied;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.StatChanged;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.events.WidgetClosed;
@@ -82,8 +85,15 @@ import okhttp3.OkHttpClient;
 )
 public class XPTempoPlugin extends Plugin
 {
-	static final String VERSION = "0.6.0";
+	static final String VERSION = "0.7.0";
 	/** "Your Vorkath kill count is: 178." and the chest / completion / harvest / lap variants. */
+	/** The collection log's per-category entry lists, to tell which tab a page belongs to. */
+	private static final int[] CLOG_LISTS = {
+		InterfaceID.Collection.BOSS_TEXT, InterfaceID.Collection.RAID_TEXT, InterfaceID.Collection.CLUE_TEXT,
+		InterfaceID.Collection.MINIGAME_TEXT, InterfaceID.Collection.OTHER_TEXT,
+	};
+	private static final String[] CLOG_CATEGORIES = {"BOSSES", "RAIDS", "CLUES", "MINIGAMES", "OTHER"};
+	private final CollectionLogReader clog = new CollectionLogReader();
 	private static final Pattern KILL_COUNT = Pattern.compile("^Your (.+?) (kill|completion|chest|harvest|success|lap|rumour|catch) count is:? ([\\d,]+)");
 	/** StatChanged and GE bursts for two ticks after LOGGED_IN; XP and the display name are unreliable until then. */
 	private static final int INIT_TICKS = 2;
@@ -571,10 +581,6 @@ public class XPTempoPlugin extends Plugin
 		{
 			geOpen = true;
 		}
-		else if (event.getGroupId() == InterfaceID.COLLECTION)
-		{
-			readCounts("COLLECTION_LOG", InterfaceID.Collection.FRAME, InterfaceID.Collection.HEADER, InterfaceID.Collection.CONTENT);
-		}
 		else if (event.getGroupId() == InterfaceID.COLLECTION_OVERVIEW)
 		{
 			readCounts("COLLECTION_LOG", InterfaceID.CollectionOverview.INFINITY, InterfaceID.CollectionOverview.UNIVERSE, InterfaceID.CollectionOverview.CONTENT);
@@ -583,6 +589,92 @@ public class XPTempoPlugin extends Plugin
 		{
 			readCounts("COMBAT_ACHIEVEMENTS", InterfaceID.CaOverview.INFINITY, InterfaceID.CaOverview.UNIVERSE, InterfaceID.CaOverview.CA_GENERAL_CONTENT);
 		}
+	}
+
+	// ---------------------------------------------------------------- collection log
+
+	/** The game redraws the item list each time a collection log page is shown: read the page then. */
+	@Subscribe
+	public void onScriptPostFired(ScriptPostFired event)
+	{
+		if (event.getScriptId() == ScriptID.COLLECTION_DRAW_LIST)
+		{
+			clientThread.invokeLater(this::readCollectionLogPage);
+		}
+	}
+
+	private void readCollectionLogPage()
+	{
+		if (sessionId == null || !config.uploadLoot())
+		{
+			return;
+		}
+		Widget header = client.getWidget(InterfaceID.Collection.HEADER_TEXT);
+		Widget itemsWidget = client.getWidget(InterfaceID.Collection.ITEMS);
+		if (header == null || itemsWidget == null || header.isHidden())
+		{
+			return;
+		}
+		CollectionLogReader.Header h = CollectionLogReader.parseHeader(texts(header.getDynamicChildren()));
+		if (h == null)
+		{
+			return;
+		}
+		List<int[]> items = new ArrayList<>();
+		Widget[] slots = itemsWidget.getDynamicChildren();
+		if (slots != null)
+		{
+			for (Widget w : slots)
+			{
+				if (w != null && w.getItemId() > 0)
+				{
+					// Missing items are drawn faded; obtained ones at full opacity.
+					items.add(new int[]{w.getItemId(), Math.max(0, w.getItemQuantity()), w.getOpacity() == 0 ? 1 : 0});
+				}
+			}
+		}
+		Widget frame = client.getWidget(InterfaceID.Collection.FRAME);
+		String logged = frame == null ? null : CollectionLogReader.parseLogged(texts(frame.getDynamicChildren()));
+		Map<String, Object> fields = clog.page(h, clogCategory(h.title), items, logged);
+		if (fields != null)
+		{
+			Map<String, Object> ev = event("clog_page", System.currentTimeMillis());
+			ev.putAll(fields);
+			pendingEvents.add(ev);
+		}
+	}
+
+	/** Which tab's entry list holds this page name; null when none does (the server then leaves it uncategorised). */
+	private String clogCategory(String title)
+	{
+		for (int i = 0; i < CLOG_LISTS.length; i++)
+		{
+			Widget list = client.getWidget(CLOG_LISTS[i]);
+			for (String t : texts(list == null ? null : list.getDynamicChildren()))
+			{
+				if (t.equalsIgnoreCase(title))
+				{
+					return CLOG_CATEGORIES[i];
+				}
+			}
+		}
+		return null;
+	}
+
+	private static List<String> texts(Widget[] widgets)
+	{
+		List<String> out = new ArrayList<>();
+		if (widgets != null)
+		{
+			for (Widget w : widgets)
+			{
+				if (w != null && w.getText() != null && !w.getText().isEmpty())
+				{
+					out.add(Text.removeTags(w.getText()).trim());
+				}
+			}
+		}
+		return out;
 	}
 
 	// ---------------------------------------------------------------- loot, kill counts, overview totals
@@ -650,7 +742,14 @@ public class XPTempoPlugin extends Plugin
 		{
 			return;
 		}
-		Matcher m = KILL_COUNT.matcher(Text.removeTags(event.getMessage()));
+		String plain = Text.removeTags(event.getMessage());
+		String newItem = CollectionLogReader.parseNewItem(plain);
+		if (newItem != null)
+		{
+			pendingEvents.add(event("clog_new", System.currentTimeMillis(), "itemName", newItem));
+			return;
+		}
+		Matcher m = KILL_COUNT.matcher(plain);
 		if (m.find())
 		{
 			pendingEvents.add(event("kill_count", System.currentTimeMillis(),
@@ -881,6 +980,8 @@ public class XPTempoPlugin extends Plugin
 			types.add("loot");
 			types.add("kill_count");
 			types.add("counts");
+			types.add("clog_page");
+			types.add("clog_new");
 		}
 		if (types.isEmpty() && kinds.isEmpty())
 		{
@@ -960,6 +1061,7 @@ public class XPTempoPlugin extends Plugin
 			lastFlushMs = now;
 			lastHeartbeatMs = now;
 			urgent = true;
+			clog.reset();
 			log.debug("XPTempo: session {} started for {} on world {}", sessionId, displayName, world);
 		}
 		else

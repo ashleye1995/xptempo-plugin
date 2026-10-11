@@ -42,7 +42,9 @@ Each with its own switch under "What to send":
 - **Bank** — item ids and quantities while the bank is open and when it closes.
 - **Grand Exchange offers** — every offer change, with a stable id per offer so restarts never duplicate one.
 - **Drops and kill counts** — what monsters, chests and pickpockets give you, the kill counts the game announces,
-  and the collection log and combat achievement totals when you open those interfaces.
+  the combat achievement totals when you open that interface, and your collection log: the items (obtained or
+  missing, with quantities) and kill counts on each page you open, and the game's "New item added to your
+  collection log" messages.
 
 Items are valued on the server with the OSRS Wiki's real-time prices. Uploads are batched, retried with back-off
 when the server is unreachable, and switching the plugin off stops them at once.
