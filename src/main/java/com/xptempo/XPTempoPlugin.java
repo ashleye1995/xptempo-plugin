@@ -609,29 +609,22 @@ public class XPTempoPlugin extends Plugin
 		{
 			return;
 		}
-		Widget header = client.getWidget(InterfaceID.Collection.HEADER_TEXT);
-		Widget itemsWidget = client.getWidget(InterfaceID.Collection.ITEMS);
-		if (header == null || itemsWidget == null || header.isHidden())
+		// The header's lines and the item grid live in child widgets whose exact parent differs between game
+		// versions, so look in both candidates (gameval HEADER / HEADER_TEXT, ITEMS / ITEMS_CONTENTS).
+		List<String> headerLines = allTexts(client.getWidget(InterfaceID.Collection.HEADER_TEXT));
+		if (headerLines.isEmpty())
 		{
-			return;
+			headerLines = allTexts(client.getWidget(InterfaceID.Collection.HEADER));
 		}
-		CollectionLogReader.Header h = CollectionLogReader.parseHeader(texts(header.getDynamicChildren()));
+		CollectionLogReader.Header h = CollectionLogReader.parseHeader(headerLines);
+		List<int[]> items = itemSlots(client.getWidget(InterfaceID.Collection.ITEMS));
+		if (items.isEmpty())
+		{
+			items = itemSlots(client.getWidget(InterfaceID.Collection.ITEMS_CONTENTS));
+		}
 		if (h == null)
 		{
 			return;
-		}
-		List<int[]> items = new ArrayList<>();
-		Widget[] slots = itemsWidget.getDynamicChildren();
-		if (slots != null)
-		{
-			for (Widget w : slots)
-			{
-				if (w != null && w.getItemId() > 0)
-				{
-					// Missing items are drawn faded; obtained ones at full opacity.
-					items.add(new int[]{w.getItemId(), Math.max(0, w.getItemQuantity()), w.getOpacity() == 0 ? 1 : 0});
-				}
-			}
 		}
 		Widget frame = client.getWidget(InterfaceID.Collection.FRAME);
 		String logged = frame == null ? null : CollectionLogReader.parseLogged(texts(frame.getDynamicChildren()));
@@ -641,6 +634,53 @@ public class XPTempoPlugin extends Plugin
 			Map<String, Object> ev = event("clog_page", System.currentTimeMillis());
 			ev.putAll(fields);
 			pendingEvents.add(ev);
+		}
+	}
+
+	/** Item slots under a widget (its dynamic children, or theirs one level down): [item id, quantity, 1 obtained / 0]. */
+	private static List<int[]> itemSlots(Widget parent)
+	{
+		List<int[]> items = new ArrayList<>();
+		if (parent == null)
+		{
+			return items;
+		}
+		Widget[] slots = parent.getDynamicChildren();
+		for (Widget w : slots == null ? new Widget[0] : slots)
+		{
+			if (w != null && w.getItemId() > 0)
+			{
+				// Missing items are drawn faded; obtained ones at full opacity.
+				items.add(new int[]{w.getItemId(), Math.max(0, w.getItemQuantity()), w.getOpacity() == 0 ? 1 : 0});
+			}
+		}
+		return items;
+	}
+
+	/** Every non-empty text under a widget, two levels deep, in drawing order. */
+	private static List<String> allTexts(Widget root)
+	{
+		List<String> out = new ArrayList<>();
+		addTexts(root, out, 0);
+		return out;
+	}
+
+	private static void addTexts(Widget w, List<String> out, int depth)
+	{
+		if (w == null || depth > 2 || out.size() >= 20)
+		{
+			return;
+		}
+		if (w.getText() != null && !w.getText().trim().isEmpty())
+		{
+			out.add(Text.removeTags(w.getText()).trim());
+		}
+		for (Widget[] group : new Widget[][]{w.getDynamicChildren(), w.getStaticChildren(), w.getNestedChildren()})
+		{
+			for (Widget c : group == null ? new Widget[0] : group)
+			{
+				addTexts(c, out, depth + 1);
+			}
 		}
 	}
 
