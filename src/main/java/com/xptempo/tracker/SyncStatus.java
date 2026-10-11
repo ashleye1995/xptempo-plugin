@@ -1,0 +1,132 @@
+package com.xptempo.tracker;
+
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * What has reached the server, for the side panel's "Sync" section: when the last upload was accepted, the last
+ * problem (if uploads are failing), and when each kind of data was last sent. Fed from the upload acknowledgements;
+ * kept in memory only.
+ */
+public final class SyncStatus
+{
+	public enum Kind
+	{
+		SKILLS("Skills and XP", "when you gain XP"),
+		PROGRESS("Quests, diaries, combat tasks", "at login"),
+		INVENTORY("Inventory and worn items", "when they change"),
+		BANK("Bank", "open your bank"),
+		GE("Grand Exchange offers", "when you have offers"),
+		DROPS("Drops and kill counts", "on your next drop"),
+		COLLECTION_LOG("Collection log", "open the log");
+
+		public final String label;
+		/** When it will be sent, for a kind not sent yet. */
+		public final String hint;
+
+		Kind(String label, String hint)
+		{
+			this.label = label;
+			this.hint = hint;
+		}
+	}
+
+	/** An immutable copy for the panel. */
+	public static final class Snapshot
+	{
+		public final long lastUploadAt;
+		public final String problem;
+		public final Map<Kind, Long> lastSent;
+		public final int clogPages;
+
+		Snapshot(long lastUploadAt, String problem, Map<Kind, Long> lastSent, int clogPages)
+		{
+			this.lastUploadAt = lastUploadAt;
+			this.problem = problem;
+			this.lastSent = lastSent;
+			this.clogPages = clogPages;
+		}
+	}
+
+	private long lastUploadAt;
+	private String problem;
+	private final EnumMap<Kind, Long> lastSent = new EnumMap<>(Kind.class);
+	private int clogPages;
+
+	/** Which kind of data an event is; null for session bookkeeping (heartbeats, session start/end, game events). */
+	public static Kind kindOf(Map<String, Object> event)
+	{
+		Object type = event.get("type");
+		if (type == null)
+		{
+			return null;
+		}
+		switch (type.toString())
+		{
+			case "skills":
+			case "xp":
+				return Kind.SKILLS;
+			case "milestones":
+				return Kind.PROGRESS;
+			case "container":
+				return "BANK".equals(String.valueOf(event.get("container"))) ? Kind.BANK : Kind.INVENTORY;
+			case "ge_offer":
+				return Kind.GE;
+			case "loot":
+			case "kill_count":
+				return Kind.DROPS;
+			case "clog_page":
+			case "clog_new":
+			case "counts":
+				return Kind.COLLECTION_LOG;
+			default:
+				return null;
+		}
+	}
+
+	/** An upload was accepted: everything in it is now on the server. */
+	public synchronized void accepted(List<Map<String, Object>> events, long now)
+	{
+		lastUploadAt = now;
+		problem = null;
+		for (Map<String, Object> e : events == null ? Collections.<Map<String, Object>>emptyList() : events)
+		{
+			Kind k = kindOf(e);
+			if (k != null)
+			{
+				lastSent.put(k, now);
+			}
+			if ("clog_page".equals(e.get("type")))
+			{
+				clogPages++;
+			}
+		}
+	}
+
+	public synchronized void failed(String message)
+	{
+		problem = message;
+	}
+
+	public synchronized Snapshot snapshot()
+	{
+		return new Snapshot(lastUploadAt, problem, new EnumMap<>(lastSent), clogPages);
+	}
+
+	/** "12s ago", "4m ago", "2h ago". */
+	public static String ago(long then, long now)
+	{
+		long s = Math.max(0, (now - then) / 1000);
+		if (s < 60)
+		{
+			return s + "s ago";
+		}
+		if (s < 3600)
+		{
+			return (s / 60) + "m ago";
+		}
+		return (s / 3600) + "h ago";
+	}
+}

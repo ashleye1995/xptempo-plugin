@@ -8,6 +8,7 @@ import com.xptempo.tracker.CollectionLogReader;
 import com.xptempo.tracker.ContainerTracker;
 import com.xptempo.tracker.GeOfferTracker;
 import com.xptempo.tracker.SyncGuide;
+import com.xptempo.tracker.SyncStatus;
 import com.xptempo.ui.SyncGuideOverlay;
 import com.xptempo.ui.SyncGuideSceneOverlay;
 import com.xptempo.ui.XPTempoPanel;
@@ -218,6 +219,8 @@ public class XPTempoPlugin extends Plugin
 
 	/** The "Get synced" walkthrough: progress per RuneScape profile, a side-bar checklist and an in-game outline. */
 	private SyncGuide guide = new SyncGuide(null);
+	/** What has reached the server, for the side panel. */
+	private final SyncStatus syncStatus = new SyncStatus();
 	private XPTempoPanel panel;
 	private NavigationButton guideButton;
 	private SyncGuideOverlay guideOverlay;
@@ -289,6 +292,7 @@ public class XPTempoPlugin extends Plugin
 			@Override
 			public void onAck(Payloads.Batch sent, Payloads.Ack ack)
 			{
+				syncStatus.accepted(sent.events, System.currentTimeMillis());
 				if (ack.config != null)
 				{
 					if (ack.config.xpFlushSeconds >= 10)
@@ -350,6 +354,7 @@ public class XPTempoPlugin extends Plugin
 			@Override
 			public void onFailure(String message, boolean willRetry)
 			{
+				syncStatus.failed(willRetry ? "Can't reach the XPTempo server right now; retrying." : "Upload failed: " + message);
 				if (willRetry)
 				{
 					log.debug("XPTempo: {}", message);
@@ -371,7 +376,8 @@ public class XPTempoPlugin extends Plugin
 		maybePair();
 
 		// XPTempo's side panel is always there: status, settings and the "Get synced" checklist.
-		panel = new XPTempoPanel(configManager, config);
+		panel = new XPTempoPanel(configManager, config, () -> new XPTempoPanel.SyncInfo(syncStatus.snapshot(),
+			Math.min(lastFlushMs + xpFlushSeconds * 1000L, lastHeartbeatMs + heartbeatSeconds * 1000L), sessionId != null));
 		BufferedImage icon = ImageUtil.loadImageResource(getClass(), "guide_icon.png");
 		guideButton = NavigationButton.builder().tooltip("XPTempo").icon(icon).priority(9).panel(panel).build();
 		clientToolbar.addNavigation(guideButton);
@@ -401,6 +407,7 @@ public class XPTempoPlugin extends Plugin
 		bankObjects.clear();
 		bankers.clear();
 		clientToolbar.removeNavigation(guideButton);
+		panel.dispose();
 	}
 
 	// ---------------------------------------------------------------- sync guide

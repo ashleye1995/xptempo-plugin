@@ -2,11 +2,14 @@ package com.xptempo.ui;
 
 import com.xptempo.XPTempoConfig;
 import com.xptempo.tracker.SyncGuide;
+import com.xptempo.tracker.SyncStatus;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.util.List;
+import java.util.function.Supplier;
+import javax.swing.Timer;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -47,6 +50,26 @@ public class XPTempoPanel extends PluginPanel
 		}
 	}
 
+	/** Live upload state for the "Sync" section, read every second. */
+	public static final class SyncInfo
+	{
+		final SyncStatus.Snapshot snapshot;
+		final long nextUploadAt;
+		final boolean live;
+
+		public SyncInfo(SyncStatus.Snapshot snapshot, long nextUploadAt, boolean live)
+		{
+			this.snapshot = snapshot;
+			this.nextUploadAt = nextUploadAt;
+			this.live = live;
+		}
+	}
+
+	private static final Color AMBER = new Color(0xE8, 0xA2, 0x3B);
+	private final Supplier<SyncInfo> syncInfo;
+	private final JPanel syncRows = new JPanel();
+	private final Timer ticker;
+
 	private final ConfigManager configManager;
 	private final XPTempoConfig config;
 	private boolean updating;
@@ -68,10 +91,11 @@ public class XPTempoPanel extends PluginPanel
 	private List<SyncGuide.Row> lastSteps = java.util.Collections.emptyList();
 	private SyncGuide.Step lastCurrent;
 
-	public XPTempoPanel(ConfigManager configManager, XPTempoConfig config)
+	public XPTempoPanel(ConfigManager configManager, XPTempoConfig config, Supplier<SyncInfo> syncInfo)
 	{
 		this.configManager = configManager;
 		this.config = config;
+		this.syncInfo = syncInfo;
 		setLayout(new BorderLayout());
 		setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
@@ -85,6 +109,12 @@ public class XPTempoPanel extends PluginPanel
 		body.add(Box.createVerticalStrut(4));
 		body.add(left(status));
 		body.add(Box.createVerticalStrut(10));
+
+		syncRows.setLayout(new BoxLayout(syncRows, BoxLayout.Y_AXIS));
+		syncRows.setOpaque(false);
+		body.add(section("Sync", syncRows));
+		ticker = new Timer(1000, e -> renderSync());
+		ticker.start();
 
 		enabled.addActionListener(e -> onEnabled());
 		body.add(section("Uploads", enabled));
@@ -164,6 +194,83 @@ public class XPTempoPanel extends PluginPanel
 			revalidate();
 			repaint();
 		});
+	}
+
+	/** Stops the once-a-second refresh (the plugin calls this when it shuts down). */
+	public void dispose()
+	{
+		ticker.stop();
+	}
+
+	/** The "Sync" section: last and next upload, any problem, and when each kind of data was last sent. */
+	private void renderSync()
+	{
+		SyncInfo info = syncInfo.get();
+		syncRows.removeAll();
+		long now = System.currentTimeMillis();
+		if (!config.enabled() || config.apiKey().trim().isEmpty())
+		{
+			syncRows.add(left(grey("Nothing is sent until uploads are on and this profile is paired.")));
+		}
+		else
+		{
+			SyncStatus.Snapshot s = info.snapshot;
+			syncRows.add(left(line("Last upload", s.lastUploadAt == 0 ? "not yet" : SyncStatus.ago(s.lastUploadAt, now), Color.WHITE)));
+			if (info.live)
+			{
+				long in = Math.max(0, (info.nextUploadAt - now) / 1000);
+				syncRows.add(left(line("Next upload", in == 0 ? "now" : "in " + in + "s", Color.WHITE)));
+			}
+			else
+			{
+				syncRows.add(left(line("Next upload", "when you log in", ColorScheme.LIGHT_GRAY_COLOR)));
+			}
+			if (s.problem != null)
+			{
+				JLabel p = new JLabel("<html>" + escape(s.problem) + "</html>");
+				p.setForeground(AMBER);
+				syncRows.add(Box.createVerticalStrut(4));
+				syncRows.add(left(p));
+			}
+			syncRows.add(Box.createVerticalStrut(6));
+			for (SyncStatus.Kind k : SyncStatus.Kind.values())
+			{
+				boolean on = k == SyncStatus.Kind.INVENTORY ? config.uploadInventory()
+					: k == SyncStatus.Kind.BANK ? config.uploadBank()
+					: k == SyncStatus.Kind.GE ? config.uploadGe()
+					: k == SyncStatus.Kind.DROPS || k == SyncStatus.Kind.COLLECTION_LOG ? config.uploadLoot()
+					: true;
+				Long at = s.lastSent.get(k);
+				String value = !on ? "off"
+					: at != null ? SyncStatus.ago(at, now) + (k == SyncStatus.Kind.COLLECTION_LOG && s.clogPages > 0 ? " (" + s.clogPages + " pages)" : "")
+					: k.hint;
+				syncRows.add(left(line(k.label, value, at != null && on ? ACCENT : ColorScheme.LIGHT_GRAY_COLOR)));
+			}
+		}
+		syncRows.revalidate();
+		syncRows.repaint();
+	}
+
+	/** "Label ......... value" on one line. */
+	private static JPanel line(String label, String value, Color valueColor)
+	{
+		JPanel row = new JPanel(new BorderLayout(6, 0));
+		row.setOpaque(false);
+		JLabel l = new JLabel(label);
+		l.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		JLabel v = new JLabel(value);
+		v.setForeground(valueColor);
+		row.add(l, BorderLayout.WEST);
+		row.add(v, BorderLayout.EAST);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
+		return row;
+	}
+
+	private static JLabel grey(String text)
+	{
+		JLabel l = new JLabel("<html>" + text + "</html>");
+		l.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		return l;
 	}
 
 	private void onEnabled()
