@@ -255,9 +255,11 @@ public class XPTempoPanel extends PluginPanel
 		showGuide.setVisible(!folded);
 		guideToggle.setVisible(complete);
 		guideToggle.setText(folded ? "Show details" : "Hide details");
+		guideNote.setIcon(folded ? GuideIcons.DONE : null);
+		guideNote.setIconTextGap(6);
 		if (folded)
 		{
-			guideNote.setText("<html><font color='#22C99A'>\u2714</font> Everything is synced.</html>");
+			guideNote.setText("Everything is synced.");
 			return;
 		}
 		if (!shown)
@@ -282,8 +284,9 @@ public class XPTempoPanel extends PluginPanel
 		p.setBorder(BorderFactory.createCompoundBorder(
 			BorderFactory.createMatteBorder(0, 3, 0, 0, current ? ACCENT : p.getBackground()),
 			BorderFactory.createEmptyBorder(7, 8, 7, 8)));
-		JLabel mark = new JLabel(r.done ? "✔" : current ? "▶" : "○");
-		mark.setForeground(r.done || current ? ACCENT : ColorScheme.LIGHT_GRAY_COLOR);
+		JLabel mark = new JLabel(r.done ? GuideIcons.DONE : current ? GuideIcons.CURRENT : GuideIcons.TODO);
+		mark.setVerticalAlignment(JLabel.TOP);
+		mark.setBorder(BorderFactory.createEmptyBorder(2, 0, 0, 0));
 		JLabel text = new JLabel("<html><b>" + r.title + "</b><br>" + r.detail + "</html>");
 		text.setForeground(r.done ? ColorScheme.LIGHT_GRAY_COLOR : Color.WHITE);
 		p.add(mark, BorderLayout.WEST);
