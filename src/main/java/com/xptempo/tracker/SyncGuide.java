@@ -10,7 +10,7 @@ import java.util.Set;
 
 /**
  * The "Get synced" walkthrough after pairing: the few things the plugin can only read once the player opens them.
- * Everything else (skills, quests, diaries, inventory, worn items, GE offers) is read at login without help.
+ * Everything else (skills, quests, diaries, combat achievements, inventory, worn items, GE offers) is read at login.
  * Pure state and logic: the plugin reports what it sees, persists {@link State} per RuneScape profile and draws
  * the side panel and the in-game highlights from {@link #steps}.
  */
@@ -18,7 +18,7 @@ public final class SyncGuide
 {
 	public enum Step
 	{
-		BANK, COMBAT_ACHIEVEMENTS, COLLECTION_LOG
+		BANK, COLLECTION_LOG
 	}
 
 	/** Collection log tabs, in the game's order. */
@@ -28,7 +28,6 @@ public final class SyncGuide
 	public static final class State
 	{
 		public boolean bank;
-		public boolean combatAchievements;
 		/** Every page title seen, lower case. */
 		public Set<String> pagesSeen = new LinkedHashSet<>();
 		/** Each tab's page titles as the game lists them, read when that tab is shown. */
@@ -80,16 +79,6 @@ public final class SyncGuide
 			return false;
 		}
 		state.bank = true;
-		return true;
-	}
-
-	public boolean combatAchievementsOpened()
-	{
-		if (state.combatAchievements)
-		{
-			return false;
-		}
-		state.combatAchievements = true;
 		return true;
 	}
 
@@ -190,7 +179,7 @@ public final class SyncGuide
 		return nextCategory() == null;
 	}
 
-	/** The checklist for the switches that are on (bank needs "Bank"; the other two "Drops and kill counts"). */
+	/** The checklist for the switches that are on (bank needs "Bank"; the collection log "Drops and kill counts"). */
 	public List<Row> steps(boolean bankOn, boolean lootOn)
 	{
 		List<Row> rows = new ArrayList<>();
@@ -200,8 +189,6 @@ public final class SyncGuide
 		}
 		if (lootOn)
 		{
-			rows.add(new Row(Step.COMBAT_ACHIEVEMENTS, "Open Combat Achievements",
-				state.combatAchievements ? "Points synced" : "Character Summary, then Combat Achievements", state.combatAchievements));
 			boolean done = collectionLogDone();
 			String detail;
 			if (done)

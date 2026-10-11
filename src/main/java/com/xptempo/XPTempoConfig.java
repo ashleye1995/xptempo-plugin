@@ -54,7 +54,7 @@ public interface XPTempoConfig extends Config
 	}
 
 	@ConfigItem(keyName = KEY_SHOW_GUIDE, name = "Show sync guide", position = 3,
-		description = "After pairing, a checklist in the side bar and a green outline in game walk you through the few things that only sync once you open them (bank, Combat Achievements, every collection log page).")
+		description = "After pairing, a checklist in the side bar and a green outline in game walk you through the few things that only sync once you open them (your bank and every collection log page).")
 	default boolean showSyncGuide()
 	{
 		return true;

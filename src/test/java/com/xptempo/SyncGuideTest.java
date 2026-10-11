@@ -17,9 +17,9 @@ public class SyncGuideTest
 	public void onlyTheSwitchedOnStepsAreListed()
 	{
 		SyncGuide g = new SyncGuide(null);
-		assertEquals(3, g.steps(true, true).size());
+		assertEquals(2, g.steps(true, true).size());
 		assertEquals(Collections.singletonList(SyncGuide.Step.BANK), stepsOf(g.steps(true, false)));
-		assertEquals(Arrays.asList(SyncGuide.Step.COMBAT_ACHIEVEMENTS, SyncGuide.Step.COLLECTION_LOG), stepsOf(g.steps(false, true)));
+		assertEquals(Collections.singletonList(SyncGuide.Step.COLLECTION_LOG), stepsOf(g.steps(false, true)));
 		assertTrue(g.steps(false, false).isEmpty());
 		assertNull(g.current(false, false));
 	}
@@ -31,8 +31,6 @@ public class SyncGuideTest
 		assertEquals(SyncGuide.Step.BANK, g.current(true, true));
 		assertTrue(g.bankOpened());
 		assertFalse("already done", g.bankOpened());
-		assertEquals(SyncGuide.Step.COMBAT_ACHIEVEMENTS, g.current(true, true));
-		assertTrue(g.combatAchievementsOpened());
 		assertEquals(SyncGuide.Step.COLLECTION_LOG, g.current(true, true));
 	}
 
@@ -55,7 +53,7 @@ public class SyncGuideTest
 		assertTrue(g.collectionLogDone());
 		assertEquals(6, g.pagesListed());
 		assertEquals(6, g.pagesOpened());
-		assertTrue("the collection log row reads as done", g.steps(false, true).get(1).done);
+		assertTrue("the collection log row reads as done", g.steps(false, true).get(0).done);
 	}
 
 	@Test

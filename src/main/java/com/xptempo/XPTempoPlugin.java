@@ -172,6 +172,10 @@ public class XPTempoPlugin extends Plugin
 	private static final int[] CA_TIER_VARBITS = {
 		VarbitID.CA_TIER_STATUS_EASY, VarbitID.CA_TIER_STATUS_MEDIUM, VarbitID.CA_TIER_STATUS_HARD,
 		VarbitID.CA_TIER_STATUS_ELITE, VarbitID.CA_TIER_STATUS_MASTER, VarbitID.CA_TIER_STATUS_GRANDMASTER};
+	/** Tasks completed per tier, Easy to Grandmaster: the server works the points out from these (0.7.0). */
+	private static final int[] CA_TASK_VARBITS = {
+		VarbitID.CA_TOTAL_TASKS_COMPLETED_EASY, VarbitID.CA_TOTAL_TASKS_COMPLETED_MEDIUM, VarbitID.CA_TOTAL_TASKS_COMPLETED_HARD,
+		VarbitID.CA_TOTAL_TASKS_COMPLETED_ELITE, VarbitID.CA_TOTAL_TASKS_COMPLETED_MASTER, VarbitID.CA_TOTAL_TASKS_COMPLETED_GRANDMASTER};
 
 	@Inject
 	private Client client;
@@ -560,10 +564,6 @@ public class XPTempoPlugin extends Plugin
 			return null;
 		}
 		SyncGuide.Step step = guide.current(config.uploadBank(), config.uploadLoot());
-		if (step == SyncGuide.Step.COMBAT_ACHIEVEMENTS)
-		{
-			return pathToSummaryRow(new String[]{"Tasks", "Bosses", "Rewards"}, "Combat tasks");
-		}
 		if (step != SyncGuide.Step.COLLECTION_LOG)
 		{
 			return null; // the bank has no button to point at: the checklist says what to do
@@ -844,9 +844,26 @@ public class XPTempoPlugin extends Plugin
 		}
 	}
 
+	private List<Integer> caTasks()
+	{
+		List<Integer> out = new ArrayList<>();
+		for (int v : CA_TASK_VARBITS)
+		{
+			out.add(Math.max(0, client.getVarbitValue(v)));
+		}
+		return out;
+	}
+
 	private static boolean isCaTierVarbit(int id)
 	{
 		for (int v : CA_TIER_VARBITS)
+		{
+			if (v == id)
+			{
+				return true;
+			}
+		}
+		for (int v : CA_TASK_VARBITS)
 		{
 			if (v == id)
 			{
@@ -905,6 +922,7 @@ public class XPTempoPlugin extends Plugin
 			"questsDone", questsDone,
 			"questsTotal", questsTotal,
 			"caTiers", caTiers,
+			"caTasks", caTasks(),
 			"diaries", diaries,
 			"diaryVarps", diaryVarps));
 	}
@@ -1029,10 +1047,6 @@ public class XPTempoPlugin extends Plugin
 		}
 		else if (event.getGroupId() == InterfaceID.CA_OVERVIEW)
 		{
-			if (config.uploadLoot() && guide.combatAchievementsOpened())
-			{
-				guideChanged();
-			}
 			readCounts("COMBAT_ACHIEVEMENTS", InterfaceID.CaOverview.INFINITY, InterfaceID.CaOverview.UNIVERSE, InterfaceID.CaOverview.CA_GENERAL_CONTENT);
 		}
 	}

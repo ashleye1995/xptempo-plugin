@@ -17,8 +17,7 @@ the plugin never changes anything in the game. What it sends and how long it is 
    chat message confirms the pairing.
 
 After pairing, a **Get synced** checklist appears in RuneLite's side bar and a green outline points at what to open
-next: your bank, the Combat Achievements overview and every collection log page, which the plugin can only read
-once they are open. Each step ticks itself off; switch the guide off under **Show sync guide**. It only points, and
+next: your bank and every collection log page, which the plugin can only read once they are open. Each step ticks itself off; switch the guide off under **Show sync guide**. It only points, and
 never clicks or changes anything in the game.
 
 One pairing covers **every character you play on that RuneLite profile**: each one appears in your XPTempo account
@@ -38,7 +37,7 @@ Always sent while enabled:
 - **Skills and XP** — a full snapshot at login, then per-skill changes every 60 seconds, plus level-ups.
 - **Activity and sessions** — every 60 seconds, what you are doing (banking, Grand Exchange, fighting a named
   monster, training a skill, idle) and your XP rate over the last ten minutes; session start and end; deaths.
-- **Progress** — quest points and quests finished, combat achievement tiers, and achievement diary progress: each
+- **Progress** — quest points and quests finished, combat achievement tiers and tasks completed per tier, and achievement diary progress: each
   tier's completion and task count, plus the game's diary task variables so the app can tick individual tasks.
 
 Each with its own switch under "What to send":
