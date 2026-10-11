@@ -16,6 +16,11 @@ the plugin never changes anything in the game. What it sends and how long it is 
    then paste the code into **Pairing code**. The plugin exchanges it for an API key once and clears the code; a
    chat message confirms the pairing.
 
+After pairing, a **Get synced** checklist appears in RuneLite's side bar and a green outline points at what to open
+next: your bank, the Combat Achievements overview and every collection log page, which the plugin can only read
+once they are open. Each step ticks itself off; switch the guide off under **Show sync guide**. It only points, and
+never clicks or changes anything in the game.
+
 One pairing covers **every character you play on that RuneLite profile**: each one appears in your XPTempo account
 when it logs in. If other people play on your computer, give them their own RuneLite profile. Revoke a key from the
 app's Settings if a computer is lost, or unlink a character there to stop tracking it: the server stores nothing

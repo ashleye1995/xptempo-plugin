@@ -7,7 +7,12 @@ import com.xptempo.api.XPTempoApi;
 import com.xptempo.tracker.CollectionLogReader;
 import com.xptempo.tracker.ContainerTracker;
 import com.xptempo.tracker.GeOfferTracker;
+import com.xptempo.tracker.SyncGuide;
+import com.xptempo.ui.SyncGuideOverlay;
+import com.xptempo.ui.SyncGuidePanel;
 import com.xptempo.tracker.XpTracker;
+import java.awt.Rectangle;
+import java.awt.image.BufferedImage;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -68,6 +73,10 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.plugins.loottracker.LootReceived;
+import net.runelite.client.ui.ClientToolbar;
+import net.runelite.client.ui.NavigationButton;
+import net.runelite.client.ui.overlay.OverlayManager;
+import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
 import okhttp3.OkHttpClient;
 
@@ -93,6 +102,14 @@ public class XPTempoPlugin extends Plugin
 		InterfaceID.Collection.MINIGAME_TEXT, InterfaceID.Collection.OTHER_TEXT,
 	};
 	private static final String[] CLOG_CATEGORIES = {"BOSSES", "RAIDS", "CLUES", "MINIGAMES", "OTHER"};
+	private static final int[] CLOG_TABS = {
+		InterfaceID.Collection.BOSS_TAB, InterfaceID.Collection.RAID_TAB, InterfaceID.Collection.CLUE_TAB,
+		InterfaceID.Collection.MINIGAME_TAB, InterfaceID.Collection.OTHER_TAB,
+	};
+	private static final int[] CLOG_CONTAINERS = {
+		InterfaceID.Collection.BOSS_CONTAINER, InterfaceID.Collection.RAID_CONTAINER, InterfaceID.Collection.CLUE_CONTAINER,
+		InterfaceID.Collection.MINIGAME_CONTAINER, InterfaceID.Collection.OTHER_CONTAINER,
+	};
 	private final CollectionLogReader clog = new CollectionLogReader();
 	private static final Pattern KILL_COUNT = Pattern.compile("^Your (.+?) (kill|completion|chest|harvest|success|lap|rumour|catch) count is:? ([\\d,]+)");
 	/** StatChanged and GE bursts for two ticks after LOGGED_IN; XP and the display name are unreliable until then. */
@@ -164,6 +181,18 @@ public class XPTempoPlugin extends Plugin
 
 	@Inject
 	private ScheduledExecutorService executor;
+
+	@Inject
+	private OverlayManager overlayManager;
+
+	@Inject
+	private ClientToolbar clientToolbar;
+
+	/** The "Get synced" walkthrough: progress per RuneScape profile, a side-bar checklist and an in-game outline. */
+	private SyncGuide guide = new SyncGuide(null);
+	private SyncGuidePanel guidePanel;
+	private NavigationButton guideButton;
+	private SyncGuideOverlay guideOverlay;
 
 	private XPTempoApi api;
 	private final XpTracker tracker = new XpTracker();
@@ -312,6 +341,14 @@ public class XPTempoPlugin extends Plugin
 			}
 		});
 		maybePair();
+
+		guidePanel = new SyncGuidePanel(() -> configManager.setConfiguration(XPTempoConfig.GROUP, XPTempoConfig.KEY_SHOW_GUIDE, false));
+		BufferedImage icon = ImageUtil.loadImageResource(getClass(), "guide_icon.png");
+		guideButton = NavigationButton.builder().tooltip("XPTempo: get synced").icon(icon).priority(9).panel(guidePanel).build();
+		guideOverlay = new SyncGuideOverlay(this::guideTarget);
+		overlayManager.add(guideOverlay);
+		updateGuideButton();
+		refreshGuide();
 	}
 
 	@Override
@@ -326,6 +363,177 @@ public class XPTempoPlugin extends Plugin
 			current.flush().whenComplete((v, e) -> current.close());
 		});
 		initTicks = -1;
+		overlayManager.remove(guideOverlay);
+		clientToolbar.removeNavigation(guideButton);
+	}
+
+	// ---------------------------------------------------------------- sync guide
+
+	private boolean guideVisible()
+	{
+		return config.showSyncGuide() && config.enabled() && !config.apiKey().trim().isEmpty();
+	}
+
+	/** The side-bar button is there while the guide is switched on and the plugin is paired. */
+	private void updateGuideButton()
+	{
+		if (guideVisible())
+		{
+			clientToolbar.addNavigation(guideButton);
+		}
+		else
+		{
+			clientToolbar.removeNavigation(guideButton);
+		}
+	}
+
+	private void refreshGuide()
+	{
+		if (guidePanel != null)
+		{
+			guidePanel.show(guide.steps(config.uploadBank(), config.uploadLoot()), guide.current(config.uploadBank(), config.uploadLoot()));
+		}
+	}
+
+	private void loadGuide()
+	{
+		String json = configManager.getRSProfileConfiguration(XPTempoConfig.GROUP, "syncguide");
+		SyncGuide.State state = null;
+		try
+		{
+			state = json == null || json.isEmpty() ? null : gson.fromJson(json, SyncGuide.State.class);
+		}
+		catch (RuntimeException e)
+		{
+			log.debug("XPTempo: sync guide state unreadable, starting over", e);
+		}
+		guide = new SyncGuide(state);
+		refreshGuide();
+	}
+
+	private void guideChanged()
+	{
+		configManager.setRSProfileConfiguration(XPTempoConfig.GROUP, "syncguide", gson.toJson(guide.state()));
+		refreshGuide();
+	}
+
+	private static boolean visible(Widget w)
+	{
+		return w != null && !w.isHidden() && w.getBounds() != null && w.getBounds().width > 0;
+	}
+
+	/** What to outline right now (called by the overlay on the client thread); null when there is nothing to point at. */
+	private Rectangle guideTarget()
+	{
+		if (!guideVisible() || sessionId == null)
+		{
+			return null;
+		}
+		SyncGuide.Step step = guide.current(config.uploadBank(), config.uploadLoot());
+		if (step == SyncGuide.Step.COMBAT_ACHIEVEMENTS)
+		{
+			return pathToSummaryRow("Combat Achievements");
+		}
+		if (step != SyncGuide.Step.COLLECTION_LOG)
+		{
+			return null; // the bank has no button to point at: the checklist says what to do
+		}
+		if (!visible(client.getWidget(InterfaceID.Collection.FRAME)))
+		{
+			return pathToSummaryRow("Collection Log");
+		}
+		String next = guide.nextCategory();
+		int active = activeClogTab();
+		int wanted = next == null ? -1 : SyncGuide.CATEGORIES.indexOf(next);
+		if (wanted >= 0 && wanted != active)
+		{
+			Widget tab = client.getWidget(CLOG_TABS[wanted]);
+			return visible(tab) ? tab.getBounds() : null;
+		}
+		String page = guide.nextPage();
+		Widget list = active < 0 ? null : client.getWidget(CLOG_LISTS[active]);
+		if (page == null || list == null || list.getDynamicChildren() == null)
+		{
+			return null;
+		}
+		Widget container = client.getWidget(CLOG_CONTAINERS[active]);
+		for (Widget entry : list.getDynamicChildren())
+		{
+			if (entry != null && entry.getText() != null && Text.removeTags(entry.getText()).trim().equalsIgnoreCase(page))
+			{
+				Rectangle r = entry.getBounds();
+				// Only while it is scrolled into view; otherwise the checklist names the page.
+				return container != null && container.getBounds() != null && container.getBounds().intersects(r) ? r : null;
+			}
+		}
+		return null;
+	}
+
+	/** Journal side tab, then its Character Summary sub-tab, then the row itself. */
+	private Rectangle pathToSummaryRow(String row)
+	{
+		Widget summary = client.getWidget(InterfaceID.AccountSummarySidepanel.SUMMARY_CONTENTS);
+		if (visible(summary))
+		{
+			Widget hit = findText(summary, row, 0);
+			if (hit != null)
+			{
+				Rectangle r = hit.getBounds();
+				return new Rectangle(summary.getBounds().x, r.y - 2, summary.getBounds().width, r.height + 4);
+			}
+			return null;
+		}
+		if (visible(client.getWidget(InterfaceID.SideJournal.UNIVERSE)))
+		{
+			Widget tab = client.getWidget(InterfaceID.SideJournal.TAB_ICON_1);
+			return visible(tab) ? tab.getBounds() : null;
+		}
+		for (int stone : new int[]{InterfaceID.ToplevelOsrsStretch.STONE2, InterfaceID.ToplevelPreEoc.STONE2, InterfaceID.Toplevel.STONE2})
+		{
+			Widget w = client.getWidget(stone);
+			if (visible(w))
+			{
+				return w.getBounds();
+			}
+		}
+		return null;
+	}
+
+	private static Widget findText(Widget w, String text, int depth)
+	{
+		if (w == null || depth > 3)
+		{
+			return null;
+		}
+		if (w.getText() != null && Text.removeTags(w.getText()).trim().toLowerCase().startsWith(text.toLowerCase()) && !w.isHidden())
+		{
+			return w;
+		}
+		for (Widget[] group : new Widget[][]{w.getDynamicChildren(), w.getStaticChildren(), w.getNestedChildren()})
+		{
+			for (Widget c : group == null ? new Widget[0] : group)
+			{
+				Widget hit = findText(c, text, depth + 1);
+				if (hit != null)
+				{
+					return hit;
+				}
+			}
+		}
+		return null;
+	}
+
+	/** Which collection log tab is showing (its entry list is visible), or -1. */
+	private int activeClogTab()
+	{
+		for (int i = 0; i < CLOG_CONTAINERS.length; i++)
+		{
+			if (visible(client.getWidget(CLOG_CONTAINERS[i])))
+			{
+				return i;
+			}
+		}
+		return -1;
 	}
 
 	// ---------------------------------------------------------------- game state
@@ -576,6 +784,10 @@ public class XPTempoPlugin extends Plugin
 		if (event.getGroupId() == InterfaceID.BANKMAIN)
 		{
 			bankOpen = true;
+			if (config.uploadBank() && guide.bankOpened())
+			{
+				guideChanged();
+			}
 		}
 		else if (event.getGroupId() == InterfaceID.GE_OFFERS)
 		{
@@ -587,6 +799,10 @@ public class XPTempoPlugin extends Plugin
 		}
 		else if (event.getGroupId() == InterfaceID.CA_OVERVIEW)
 		{
+			if (config.uploadLoot() && guide.combatAchievementsOpened())
+			{
+				guideChanged();
+			}
 			readCounts("COMBAT_ACHIEVEMENTS", InterfaceID.CaOverview.INFINITY, InterfaceID.CaOverview.UNIVERSE, InterfaceID.CaOverview.CA_GENERAL_CONTENT);
 		}
 	}
@@ -625,6 +841,18 @@ public class XPTempoPlugin extends Plugin
 		if (h == null)
 		{
 			return;
+		}
+		// Guide progress: this page, and the list of pages in the tab that is showing.
+		boolean guideMoved = guide.pageSeen(h.title);
+		int active = activeClogTab();
+		if (active >= 0)
+		{
+			Widget list = client.getWidget(CLOG_LISTS[active]);
+			guideMoved |= guide.listSeen(CLOG_CATEGORIES[active], texts(list == null ? null : list.getDynamicChildren()));
+		}
+		if (guideMoved)
+		{
+			guideChanged();
 		}
 		Widget frame = client.getWidget(InterfaceID.Collection.FRAME);
 		String logged = frame == null ? null : CollectionLogReader.parseLogged(texts(frame.getDynamicChildren()));
@@ -995,6 +1223,8 @@ public class XPTempoPlugin extends Plugin
 			});
 		}
 		dropSwitchedOffCategory(event.getKey());
+		updateGuideButton();
+		refreshGuide();
 	}
 
 	/** A category switch was turned off: what is waiting for it is dropped, not uploaded. */
@@ -1102,6 +1332,7 @@ public class XPTempoPlugin extends Plugin
 			lastHeartbeatMs = now;
 			urgent = true;
 			clog.reset();
+			loadGuide();
 			log.debug("XPTempo: session {} started for {} on world {}", sessionId, displayName, world);
 		}
 		else
