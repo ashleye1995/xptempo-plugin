@@ -91,6 +91,7 @@ import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
+import net.runelite.client.util.ColorUtil;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
 import okhttp3.OkHttpClient;
@@ -321,7 +322,7 @@ public class XPTempoPlugin extends Plugin
 				{
 					if (hash != -1L && unlinkedHashes.add(hash))
 					{
-						chat("XPTempo: a character on this profile was unlinked in the XPTempo app, so it is no longer synced. To track it again, clear the API key in the XPTempo settings and paste a new pairing code.");
+						chatProblem("XPTempo: a character on this profile was unlinked in the XPTempo app, so it is no longer synced. To track it again, clear the API key in the XPTempo settings and paste a new pairing code.");
 					}
 				}
 				else if (sent.sessionId != null)
@@ -342,7 +343,7 @@ public class XPTempoPlugin extends Plugin
 			{
 				// A rejected key is useless and would block the next pairing attempt, so forget it here.
 				configManager.setConfiguration(XPTempoConfig.GROUP, XPTempoConfig.KEY_API_KEY, "");
-				chat("XPTempo: the server rejected this client's key, so it was cleared. Get a pairing code from xptempo.com and paste it into the plugin settings.");
+				chatProblem("XPTempo: the server rejected this client's key, so it was cleared. Get a pairing code from xptempo.com and paste it into the plugin settings.");
 				maybePair(); // a code that was waiting can be used now
 			}
 
@@ -1766,12 +1767,12 @@ public class XPTempoPlugin extends Plugin
 		if (!config.apiKey().trim().isEmpty())
 		{
 			configManager.setConfiguration(XPTempoConfig.GROUP, XPTempoConfig.KEY_PAIRING_CODE, "");
-			chat("XPTempo: this RuneLite profile is already paired. To pair it with another account, clear the API key first.");
+			chatProblem("XPTempo: this RuneLite profile is already paired. To pair it with another account, clear the API key first.");
 			return;
 		}
 		if (!config.enabled())
 		{
-			chat("XPTempo: turn on \"Enable XPTempo\" to pair with the code you pasted.");
+			chatProblem("XPTempo: turn on \"Enable XPTempo\" to pair with the code you pasted.");
 			return;
 		}
 		pairing = true;
@@ -1784,18 +1785,40 @@ public class XPTempoPlugin extends Plugin
 		}, error ->
 		{
 			pairing = false;
-			chat("XPTempo: pairing failed (" + error + "). Get a fresh code from the app and try again.");
+			chatProblem("XPTempo: pairing failed (" + error + "). Get a fresh code from the app and try again.");
 		});
 	}
 
+	// Plugin messages are coloured so they stand out from the game's own black/white text: XPTempo green for news,
+	// amber for problems, each in a darker shade on the opaque (parchment) chatbox and a lighter one on the
+	// transparent chatbox.
+	private static final java.awt.Color CHAT_OPAQUE = new java.awt.Color(0x0B, 0x8A, 0x66);
+	private static final java.awt.Color CHAT_TRANSPARENT = new java.awt.Color(0x22, 0xC9, 0x9A);
+	private static final java.awt.Color CHAT_PROBLEM_OPAQUE = new java.awt.Color(0xA8, 0x5F, 0x00);
+	private static final java.awt.Color CHAT_PROBLEM_TRANSPARENT = new java.awt.Color(0xE8, 0xA2, 0x3B);
+
 	private void chat(String message)
+	{
+		chat(message, false);
+	}
+
+	private void chatProblem(String message)
+	{
+		chat(message, true);
+	}
+
+	private void chat(String message, boolean problem)
 	{
 		log.debug(message);
 		clientThread.invoke(() ->
 		{
 			if (client.getGameState() == GameState.LOGGED_IN)
 			{
-				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", message, null);
+				boolean transparent = client.isResized() && client.getVarbitValue(VarbitID.CHATBOX_TRANSPARENCY) == 1;
+				java.awt.Color color = problem
+					? (transparent ? CHAT_PROBLEM_TRANSPARENT : CHAT_PROBLEM_OPAQUE)
+					: (transparent ? CHAT_TRANSPARENT : CHAT_OPAQUE);
+				client.addChatMessage(ChatMessageType.GAMEMESSAGE, "", ColorUtil.wrapWithColorTag(message, color), null);
 			}
 		});
 	}
