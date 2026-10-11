@@ -635,7 +635,9 @@ public class XPTempoPlugin extends Plugin
 			Widget w = client.getWidget(stone);
 			if (visible(w))
 			{
-				return w.getBounds();
+				// The tab stone's box sits a little right of the button as drawn; nudge the outline back over it.
+				Rectangle b = w.getBounds();
+				return new Rectangle(b.x - 2, b.y, b.width, b.height);
 			}
 		}
 		return null;
