@@ -9,6 +9,7 @@ import com.xptempo.tracker.ContainerTracker;
 import com.xptempo.tracker.GeOfferTracker;
 import com.xptempo.tracker.SyncGuide;
 import com.xptempo.ui.SyncGuideOverlay;
+import com.xptempo.ui.SyncGuideSceneOverlay;
 import com.xptempo.ui.SyncGuidePanel;
 import com.xptempo.tracker.XpTracker;
 import java.awt.Rectangle;
@@ -17,6 +18,8 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +39,9 @@ import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.NPC;
+import net.runelite.api.NPCComposition;
+import net.runelite.api.ObjectComposition;
+import net.runelite.api.TileObject;
 import net.runelite.api.Player;
 import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
@@ -44,6 +50,14 @@ import net.runelite.api.Skill;
 import net.runelite.api.WorldType;
 import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.ChatMessage;
+import net.runelite.api.events.DecorativeObjectDespawned;
+import net.runelite.api.events.DecorativeObjectSpawned;
+import net.runelite.api.events.GameObjectDespawned;
+import net.runelite.api.events.GameObjectSpawned;
+import net.runelite.api.events.NpcDespawned;
+import net.runelite.api.events.NpcSpawned;
+import net.runelite.api.events.WallObjectDespawned;
+import net.runelite.api.events.WallObjectSpawned;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GrandExchangeOfferChanged;
@@ -76,6 +90,7 @@ import net.runelite.client.plugins.loottracker.LootReceived;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
+import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
 import net.runelite.client.util.ImageUtil;
 import net.runelite.client.util.Text;
 import okhttp3.OkHttpClient;
@@ -187,6 +202,14 @@ public class XPTempoPlugin extends Plugin
 
 	@Inject
 	private ClientToolbar clientToolbar;
+
+	@Inject
+	private ModelOutlineRenderer modelOutlineRenderer;
+
+	/** Bank booths, bank chests and bankers in the loaded scene, outlined during the guide's bank step. */
+	private final Set<TileObject> bankObjects = new HashSet<>();
+	private final Set<NPC> bankers = new HashSet<>();
+	private SyncGuideSceneOverlay guideSceneOverlay;
 
 	/** The "Get synced" walkthrough: progress per RuneScape profile, a side-bar checklist and an in-game outline. */
 	private SyncGuide guide = new SyncGuide(null);
@@ -347,6 +370,10 @@ public class XPTempoPlugin extends Plugin
 		guideButton = NavigationButton.builder().tooltip("XPTempo: get synced").icon(icon).priority(9).panel(guidePanel).build();
 		guideOverlay = new SyncGuideOverlay(this::guideTarget);
 		overlayManager.add(guideOverlay);
+		guideSceneOverlay = new SyncGuideSceneOverlay(modelOutlineRenderer,
+			() -> guideVisible() && sessionId != null && guide.current(config.uploadBank(), config.uploadLoot()) == SyncGuide.Step.BANK,
+			() -> bankObjects, () -> bankers);
+		overlayManager.add(guideSceneOverlay);
 		updateGuideButton();
 		refreshGuide();
 	}
@@ -364,6 +391,9 @@ public class XPTempoPlugin extends Plugin
 		});
 		initTicks = -1;
 		overlayManager.remove(guideOverlay);
+		overlayManager.remove(guideSceneOverlay);
+		bankObjects.clear();
+		bankers.clear();
 		clientToolbar.removeNavigation(guideButton);
 	}
 
@@ -420,6 +450,106 @@ public class XPTempoPlugin extends Plugin
 	private static boolean visible(Widget w)
 	{
 		return w != null && !w.isHidden() && w.getBounds() != null && w.getBounds().width > 0;
+	}
+
+	// Bank booths and chests have a "Bank" (booths) or "Use" (chests) option; bankers a "Bank" option.
+	private boolean isBankObject(int id)
+	{
+		ObjectComposition def = client.getObjectDefinition(id);
+		if (def != null && def.getImpostorIds() != null && def.getImpostor() != null)
+		{
+			def = def.getImpostor();
+		}
+		if (def == null || def.getActions() == null)
+		{
+			return false;
+		}
+		String name = def.getName() == null ? "" : def.getName().toLowerCase();
+		for (String a : def.getActions())
+		{
+			if ("Bank".equalsIgnoreCase(a) || ("Use".equalsIgnoreCase(a) && name.contains("bank")))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean isBanker(NPC npc)
+	{
+		NPCComposition def = npc.getTransformedComposition();
+		if (def == null || def.getActions() == null)
+		{
+			return false;
+		}
+		for (String a : def.getActions())
+		{
+			if ("Bank".equalsIgnoreCase(a))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	@Subscribe
+	public void onGameObjectSpawned(GameObjectSpawned e)
+	{
+		if (isBankObject(e.getGameObject().getId()))
+		{
+			bankObjects.add(e.getGameObject());
+		}
+	}
+
+	@Subscribe
+	public void onGameObjectDespawned(GameObjectDespawned e)
+	{
+		bankObjects.remove(e.getGameObject());
+	}
+
+	@Subscribe
+	public void onWallObjectSpawned(WallObjectSpawned e)
+	{
+		if (isBankObject(e.getWallObject().getId()))
+		{
+			bankObjects.add(e.getWallObject());
+		}
+	}
+
+	@Subscribe
+	public void onWallObjectDespawned(WallObjectDespawned e)
+	{
+		bankObjects.remove(e.getWallObject());
+	}
+
+	@Subscribe
+	public void onDecorativeObjectSpawned(DecorativeObjectSpawned e)
+	{
+		if (isBankObject(e.getDecorativeObject().getId()))
+		{
+			bankObjects.add(e.getDecorativeObject());
+		}
+	}
+
+	@Subscribe
+	public void onDecorativeObjectDespawned(DecorativeObjectDespawned e)
+	{
+		bankObjects.remove(e.getDecorativeObject());
+	}
+
+	@Subscribe
+	public void onNpcSpawned(NpcSpawned e)
+	{
+		if (isBanker(e.getNpc()))
+		{
+			bankers.add(e.getNpc());
+		}
+	}
+
+	@Subscribe
+	public void onNpcDespawned(NpcDespawned e)
+	{
+		bankers.remove(e.getNpc());
 	}
 
 	/** What to outline right now (called by the overlay on the client thread); null when there is nothing to point at. */
@@ -636,13 +766,21 @@ public class XPTempoPlugin extends Plugin
 			case LOGGING_IN:
 			case HOPPING:
 			case CONNECTION_LOST:
+				bankObjects.clear();
+				bankers.clear();
 				initTicks = INIT_TICKS;
 				bankOpen = false;
 				geOpen = false;
 				break;
 			case LOGIN_SCREEN:
+				bankObjects.clear();
+				bankers.clear();
 				endSession("LOGOUT");
 				initTicks = -1;
+				break;
+			case LOADING:
+				// A new area is loading: its objects spawn again afterwards (NPCs carry over and despawn themselves).
+				bankObjects.clear();
 				break;
 			default:
 				break;

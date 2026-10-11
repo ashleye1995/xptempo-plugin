@@ -196,7 +196,7 @@ public final class SyncGuide
 		List<Row> rows = new ArrayList<>();
 		if (bankOn)
 		{
-			rows.add(new Row(Step.BANK, "Open your bank", state.bank ? "Bank synced" : "Any bank booth, chest or banker", state.bank));
+			rows.add(new Row(Step.BANK, "Open your bank", state.bank ? "Bank synced" : "Any bank booth, chest or banker: they are outlined in green", state.bank));
 		}
 		if (lootOn)
 		{
