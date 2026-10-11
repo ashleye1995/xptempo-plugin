@@ -14,15 +14,18 @@ public interface XPTempoConfig extends Config
 	String KEY_PAIRING_CODE = "pairingCode";
 	String KEY_API_KEY = "apiKey";
 
+	/** Shown before uploads are switched on, here and in the XPTempo side panel. */
+	String ENABLE_WARNING = "<html>This feature submits your IP address to a 3rd-party server not controlled or verified by RuneLite developers.<br>"
+			+ "XPTempo (api.xptempo.com) receives, for every character you play on this RuneLite profile: name, account ID, account type and world,<br>"
+			+ "skills and XP, what you are doing, sessions and deaths, quest, diary and combat achievement progress,<br>"
+			+ "and, unless switched off under \"What to send\": inventory, worn items, bank, GE offers, drops and kill counts.<br>"
+			+ "Nothing is sent until you pair. You can switch this off at any time. Privacy policy: xptempo.com/privacy</html>";
+
 	@ConfigItem(
 		keyName = KEY_ENABLED,
 		name = "Enable XPTempo",
 		description = "Sends your own characters' skills and XP, activity, sessions and deaths, quest, achievement diary and combat achievement progress, and (each switchable below) inventory and worn items, bank, Grand Exchange offers, and drops and kill counts to your XPTempo account. Nothing is sent until you pair.",
-		warning = "<html>This feature submits your IP address to a 3rd-party server not controlled or verified by RuneLite developers.<br>"
-			+ "XPTempo (api.xptempo.com) receives, for every character you play on this RuneLite profile: name, account ID, account type and world,<br>"
-			+ "skills and XP, what you are doing, sessions and deaths, quest, diary and combat achievement progress,<br>"
-			+ "and, unless switched off under \"What to send\": inventory, worn items, bank, GE offers, drops and kill counts.<br>"
-			+ "Nothing is sent until you pair. You can switch this off at any time. Privacy policy: xptempo.com/privacy</html>",
+		warning = ENABLE_WARNING,
 		position = 0
 	)
 	default boolean enabled()

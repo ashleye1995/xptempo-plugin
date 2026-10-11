@@ -10,7 +10,7 @@ import com.xptempo.tracker.GeOfferTracker;
 import com.xptempo.tracker.SyncGuide;
 import com.xptempo.ui.SyncGuideOverlay;
 import com.xptempo.ui.SyncGuideSceneOverlay;
-import com.xptempo.ui.SyncGuidePanel;
+import com.xptempo.ui.XPTempoPanel;
 import com.xptempo.tracker.XpTracker;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
@@ -217,7 +217,7 @@ public class XPTempoPlugin extends Plugin
 
 	/** The "Get synced" walkthrough: progress per RuneScape profile, a side-bar checklist and an in-game outline. */
 	private SyncGuide guide = new SyncGuide(null);
-	private SyncGuidePanel guidePanel;
+	private XPTempoPanel panel;
 	private NavigationButton guideButton;
 	private SyncGuideOverlay guideOverlay;
 
@@ -369,16 +369,17 @@ public class XPTempoPlugin extends Plugin
 		});
 		maybePair();
 
-		guidePanel = new SyncGuidePanel(() -> configManager.setConfiguration(XPTempoConfig.GROUP, XPTempoConfig.KEY_SHOW_GUIDE, false));
+		// XPTempo's side panel is always there: status, settings and the "Get synced" checklist.
+		panel = new XPTempoPanel(configManager, config);
 		BufferedImage icon = ImageUtil.loadImageResource(getClass(), "guide_icon.png");
-		guideButton = NavigationButton.builder().tooltip("XPTempo: get synced").icon(icon).priority(9).panel(guidePanel).build();
+		guideButton = NavigationButton.builder().tooltip("XPTempo").icon(icon).priority(9).panel(panel).build();
+		clientToolbar.addNavigation(guideButton);
 		guideOverlay = new SyncGuideOverlay(this::guideTarget);
 		overlayManager.add(guideOverlay);
 		guideSceneOverlay = new SyncGuideSceneOverlay(modelOutlineRenderer,
 			() -> guideVisible() && sessionId != null && guide.current(config.uploadBank(), config.uploadLoot()) == SyncGuide.Step.BANK,
 			() -> bankObjects, () -> bankers);
 		overlayManager.add(guideSceneOverlay);
-		updateGuideButton();
 		refreshGuide();
 	}
 
@@ -408,24 +409,14 @@ public class XPTempoPlugin extends Plugin
 		return config.showSyncGuide() && config.enabled() && !config.apiKey().trim().isEmpty();
 	}
 
-	/** The side-bar button is there while the guide is switched on and the plugin is paired. */
-	private void updateGuideButton()
-	{
-		if (guideVisible())
-		{
-			clientToolbar.addNavigation(guideButton);
-		}
-		else
-		{
-			clientToolbar.removeNavigation(guideButton);
-		}
-	}
-
+	/** Redraws the side panel (status, settings, checklist). */
 	private void refreshGuide()
 	{
-		if (guidePanel != null)
+		if (panel != null)
 		{
-			guidePanel.show(guide.steps(config.uploadBank(), config.uploadLoot()), guide.current(config.uploadBank(), config.uploadLoot()));
+			XPTempoPanel.Status status = new XPTempoPanel.Status(config.enabled(), !config.apiKey().trim().isEmpty(),
+				sessionId != null && displayName != null ? displayName.replace('\u00A0', ' ') : null);
+			panel.update(status, guide.steps(config.uploadBank(), config.uploadLoot()), guide.current(config.uploadBank(), config.uploadLoot()));
 		}
 	}
 
@@ -1467,7 +1458,6 @@ public class XPTempoPlugin extends Plugin
 			});
 		}
 		dropSwitchedOffCategory(event.getKey());
-		updateGuideButton();
 		refreshGuide();
 	}
 
@@ -1685,6 +1675,7 @@ public class XPTempoPlugin extends Plugin
 		sessionUploaded = false;
 		bankOpen = false;
 		geOpen = false;
+		refreshGuide();
 	}
 
 	private synchronized void sendBatch()
@@ -1761,6 +1752,7 @@ public class XPTempoPlugin extends Plugin
 		sessionUploaded = false;
 		bankOpen = false;
 		geOpen = false;
+		refreshGuide();
 	}
 
 	/** Exchanges a pasted pairing code for a key. Nothing is sent to the server until "Enable XPTempo" is on. */

@@ -16,7 +16,8 @@ the plugin never changes anything in the game. What it sends and how long it is 
    then paste the code into **Pairing code**. The plugin exchanges it for an API key once and clears the code; a
    chat message confirms the pairing.
 
-After pairing, a **Get synced** checklist appears in RuneLite's side bar and a green outline points at what to open
+XPTempo has its own panel in RuneLite's side bar: the status, the uploads switch, pairing, "What to send" and a
+**Get synced** checklist, the same settings as on RuneLite's settings page. After pairing, the checklist and a green outline point at what to open
 next: your bank and every collection log page, which the plugin can only read once they are open. Each step ticks itself off; switch the guide off under **Show sync guide**. It only points, and
 never clicks or changes anything in the game.
 
