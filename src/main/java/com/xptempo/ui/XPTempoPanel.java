@@ -62,6 +62,11 @@ public class XPTempoPanel extends PluginPanel
 	private final JCheckBox showGuide = new JCheckBox("Show sync guide");
 	private final JPanel guideRows = new JPanel();
 	private final JLabel guideNote = new JLabel();
+	private final JButton guideToggle = new JButton();
+	/** Once everything is synced the section folds to one line; the player can open it again. */
+	private boolean guideExpanded;
+	private List<SyncGuide.Row> lastSteps = java.util.Collections.emptyList();
+	private SyncGuide.Step lastCurrent;
 
 	public XPTempoPanel(ConfigManager configManager, XPTempoConfig config)
 	{
@@ -98,7 +103,15 @@ public class XPTempoPanel extends PluginPanel
 		guideRows.setLayout(new BoxLayout(guideRows, BoxLayout.Y_AXIS));
 		guideRows.setOpaque(false);
 		guideNote.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		body.add(section("Get synced", showGuide, guideRows, guideNote));
+		guideToggle.setFocusable(false);
+		guideToggle.addActionListener(e ->
+		{
+			guideExpanded = !guideExpanded;
+			buildGuide(lastSteps, lastCurrent, config.showSyncGuide());
+			revalidate();
+			repaint();
+		});
+		body.add(section("Get synced", showGuide, guideRows, guideNote, guideToggle));
 
 		JButton site = new JButton("Open xptempo.com");
 		site.setFocusable(false);
@@ -230,22 +243,36 @@ public class XPTempoPanel extends PluginPanel
 
 	private void buildGuide(List<SyncGuide.Row> steps, SyncGuide.Step current, boolean shown)
 	{
+		lastSteps = steps;
+		lastCurrent = current;
 		guideRows.removeAll();
+		boolean complete = !steps.isEmpty() && steps.stream().allMatch(r -> r.done);
+		if (!complete)
+		{
+			guideExpanded = false; // a new step (or a reset) opens it again on its own
+		}
+		boolean folded = complete && !guideExpanded;
+		showGuide.setVisible(!folded);
+		guideToggle.setVisible(complete);
+		guideToggle.setText(folded ? "Show details" : "Hide details");
+		if (folded)
+		{
+			guideNote.setText("<html><font color='#22C99A'>\u2714</font> Everything is synced.</html>");
+			return;
+		}
 		if (!shown)
 		{
 			guideNote.setText("<html>Switched off. Tick it to see what is left to sync.</html>");
 			return;
 		}
-		boolean all = true;
 		for (SyncGuide.Row r : steps)
 		{
-			all &= r.done;
 			guideRows.add(row(r, r.step == current));
 			guideRows.add(Box.createVerticalStrut(6));
 		}
 		guideNote.setText(steps.isEmpty()
 			? "<html>Nothing to do: the switches that need a step are off.</html>"
-			: all ? "<html>Everything is synced.</html>" : "<html>Follow the green outline in game; each step ticks itself off.</html>");
+			: complete ? "<html>Everything is synced.</html>" : "<html>Follow the green outline in game; each step ticks itself off.</html>");
 	}
 
 	private static JPanel row(SyncGuide.Row r, boolean current)
