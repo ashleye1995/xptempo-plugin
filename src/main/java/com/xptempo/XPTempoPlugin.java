@@ -432,7 +432,7 @@ public class XPTempoPlugin extends Plugin
 		SyncGuide.Step step = guide.current(config.uploadBank(), config.uploadLoot());
 		if (step == SyncGuide.Step.COMBAT_ACHIEVEMENTS)
 		{
-			return pathToSummaryRow("Combat Achievements");
+			return pathToSummaryRow("Combat tasks", "Combat achievements");
 		}
 		if (step != SyncGuide.Step.COLLECTION_LOG)
 		{
@@ -440,7 +440,7 @@ public class XPTempoPlugin extends Plugin
 		}
 		if (!visible(client.getWidget(InterfaceID.Collection.FRAME)))
 		{
-			return pathToSummaryRow("Collection Log");
+			return pathToSummaryRow("Collections logged", "Collection Log");
 		}
 		String next = guide.nextCategory();
 		int active = activeClogTab();
@@ -469,22 +469,23 @@ public class XPTempoPlugin extends Plugin
 		return null;
 	}
 
-	/** Journal side tab, then its Character Summary sub-tab, then the row itself. */
-	private Rectangle pathToSummaryRow(String row)
+	/**
+	 * Journal side tab, then its Character Summary sub-tab, then the row itself. Row labels as the game shows them
+	 * (2026-10-11): "Combat tasks completed: 22/655" and "Collections logged: 81/1717"; any label given may match.
+	 */
+	private Rectangle pathToSummaryRow(String... labels)
 	{
+		String row = labels[0];
 		Widget summary = client.getWidget(InterfaceID.AccountSummarySidepanel.SUMMARY_CONTENTS);
 		if (visible(summary))
 		{
 			// The row's label can be split over lines, so match loosely, on its text or its click options, anywhere
 			// in the summary (its click layer holds the clickable rows).
-			Widget hit = findText(summary, row, 0);
-			if (hit == null)
+			Widget hit = null;
+			for (String label : labels)
 			{
-				hit = findText(client.getWidget(InterfaceID.AccountSummarySidepanel.SUMMARY_CLICK_LAYER), row, 0);
-			}
-			if (hit == null)
-			{
-				hit = findText(client.getWidget(InterfaceID.AccountSummarySidepanel.UNIVERSE), row, 0);
+				hit = hit != null ? hit : findText(summary, label, 0);
+				hit = hit != null ? hit : findText(client.getWidget(InterfaceID.AccountSummarySidepanel.SUMMARY_CLICK_LAYER), label, 0);
 			}
 			if (hit != null)
 			{
