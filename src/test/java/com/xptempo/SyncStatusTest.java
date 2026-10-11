@@ -53,6 +53,16 @@ public class SyncStatusTest
 	}
 
 	@Test
+	public void queuedEventsShowAsWaitingUntilSent()
+	{
+		SyncStatus s = new SyncStatus();
+		s.waiting(Arrays.asList(ev("clog_page", null), ev("clog_page", null), ev("heartbeat", null)));
+		assertEquals(Integer.valueOf(2), s.snapshot().waiting.get(SyncStatus.Kind.COLLECTION_LOG));
+		s.waiting(Collections.emptyList());
+		assertTrue(s.snapshot().waiting.isEmpty());
+	}
+
+	@Test
 	public void agoIsShortAndReadable()
 	{
 		assertEquals("12s ago", SyncStatus.ago(0, 12_000));

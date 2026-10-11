@@ -791,6 +791,7 @@ public class XPTempoPlugin extends Plugin
 	@Subscribe
 	public void onGameTick(GameTick tick)
 	{
+		syncStatus.waiting(pendingEvents);
 		if (initTicks > 0 && --initTicks == 0)
 		{
 			seed();

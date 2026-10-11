@@ -241,10 +241,13 @@ public class XPTempoPanel extends PluginPanel
 					: k == SyncStatus.Kind.DROPS || k == SyncStatus.Kind.COLLECTION_LOG ? config.uploadLoot()
 					: true;
 				Long at = s.lastSent.get(k);
+				int queued = s.waiting.getOrDefault(k, 0);
 				String value = !on ? "off"
+					: queued > 0 ? "waiting to upload (" + queued + ")"
 					: at != null ? SyncStatus.ago(at, now) + (k == SyncStatus.Kind.COLLECTION_LOG && s.clogPages > 0 ? " (" + s.clogPages + " pages)" : "")
 					: k.hint;
-				syncRows.add(left(line(k.label, value, at != null && on ? ACCENT : ColorScheme.LIGHT_GRAY_COLOR)));
+				Color c = !on ? ColorScheme.LIGHT_GRAY_COLOR : queued > 0 ? Color.WHITE : at != null ? ACCENT : ColorScheme.LIGHT_GRAY_COLOR;
+				syncRows.add(left(line(k.label, value, c)));
 			}
 		}
 		syncRows.revalidate();

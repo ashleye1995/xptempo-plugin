@@ -40,13 +40,16 @@ public final class SyncStatus
 		public final String problem;
 		public final Map<Kind, Long> lastSent;
 		public final int clogPages;
+		/** Read in game but not uploaded yet, per kind. */
+		public final Map<Kind, Integer> waiting;
 
-		Snapshot(long lastUploadAt, String problem, Map<Kind, Long> lastSent, int clogPages)
+		Snapshot(long lastUploadAt, String problem, Map<Kind, Long> lastSent, int clogPages, Map<Kind, Integer> waiting)
 		{
 			this.lastUploadAt = lastUploadAt;
 			this.problem = problem;
 			this.lastSent = lastSent;
 			this.clogPages = clogPages;
+			this.waiting = waiting;
 		}
 	}
 
@@ -54,6 +57,22 @@ public final class SyncStatus
 	private String problem;
 	private final EnumMap<Kind, Long> lastSent = new EnumMap<>(Kind.class);
 	private int clogPages;
+	private EnumMap<Kind, Integer> waiting = new EnumMap<>(Kind.class);
+
+	/** What is queued in the plugin and not uploaded yet (the plugin refreshes this every game tick). */
+	public synchronized void waiting(List<Map<String, Object>> queued)
+	{
+		EnumMap<Kind, Integer> next = new EnumMap<>(Kind.class);
+		for (Map<String, Object> e : queued)
+		{
+			Kind k = kindOf(e);
+			if (k != null)
+			{
+				next.merge(k, 1, Integer::sum);
+			}
+		}
+		waiting = next;
+	}
 
 	/** Which kind of data an event is; null for session bookkeeping (heartbeats, session start/end, game events). */
 	public static Kind kindOf(Map<String, Object> event)
@@ -112,7 +131,7 @@ public final class SyncStatus
 
 	public synchronized Snapshot snapshot()
 	{
-		return new Snapshot(lastUploadAt, problem, new EnumMap<>(lastSent), clogPages);
+		return new Snapshot(lastUploadAt, problem, new EnumMap<>(lastSent), clogPages, new EnumMap<>(waiting));
 	}
 
 	/** "12s ago", "4m ago", "2h ago". */
