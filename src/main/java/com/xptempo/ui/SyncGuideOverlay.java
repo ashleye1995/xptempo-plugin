@@ -43,9 +43,10 @@ public class SyncGuideOverlay extends Overlay
 		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 		g.setColor(new Color(ACCENT.getRed(), ACCENT.getGreen(), ACCENT.getBlue(), Math.max(60, Math.min(255, alpha))));
 		g.setStroke(new BasicStroke(2f));
-		g.drawRoundRect(r.x - 2, r.y - 2, r.width + 3, r.height + 3, 8, 8);
+		// Drawn just inside the target's edges: side tabs sit edge to edge, so anything outside spills onto the next one.
+		g.drawRoundRect(r.x + 1, r.y + 1, r.width - 3, r.height - 3, 8, 8);
 		g.setColor(new Color(ACCENT.getRed(), ACCENT.getGreen(), ACCENT.getBlue(), 28));
-		g.fillRoundRect(r.x - 2, r.y - 2, r.width + 3, r.height + 3, 8, 8);
+		g.fillRoundRect(r.x + 1, r.y + 1, r.width - 3, r.height - 3, 8, 8);
 		return null;
 	}
 }
