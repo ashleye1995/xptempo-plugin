@@ -7,6 +7,7 @@ import com.xptempo.api.XPTempoApi;
 import com.xptempo.tracker.CollectionLogReader;
 import com.xptempo.tracker.ContainerTracker;
 import com.xptempo.tracker.GeOfferTracker;
+import com.xptempo.tracker.PickupTracker;
 import com.xptempo.tracker.SyncGuide;
 import com.xptempo.tracker.SyncStatus;
 import com.xptempo.ui.SyncGuideOverlay;
@@ -21,6 +22,7 @@ import java.util.Collection;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,6 +50,7 @@ import net.runelite.api.Quest;
 import net.runelite.api.QuestState;
 import net.runelite.api.ScriptID;
 import net.runelite.api.Skill;
+import net.runelite.api.TileItem;
 import net.runelite.api.WorldType;
 import net.runelite.api.events.ActorDeath;
 import net.runelite.api.events.ChatMessage;
@@ -64,6 +67,8 @@ import net.runelite.api.events.GameTick;
 import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.api.events.HitsplatApplied;
 import net.runelite.api.events.ItemContainerChanged;
+import net.runelite.api.events.ItemDespawned;
+import net.runelite.api.events.ItemSpawned;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.StatChanged;
 import net.runelite.api.events.VarbitChanged;
@@ -228,6 +233,7 @@ public class XPTempoPlugin extends Plugin
 	private XPTempoApi api;
 	private final XpTracker tracker = new XpTracker();
 	private final ContainerTracker containers = new ContainerTracker();
+	private final PickupTracker pickups = new PickupTracker();
 	private GeOfferTracker geOffers;
 	private final List<Map<String, Object>> pendingEvents = new ArrayList<>();
 
@@ -767,6 +773,7 @@ public class XPTempoPlugin extends Plugin
 			case LOGGING_IN:
 			case HOPPING:
 			case CONNECTION_LOST:
+				pickups.reset();
 				bankObjects.clear();
 				bankers.clear();
 				initTicks = INIT_TICKS;
@@ -815,6 +822,7 @@ public class XPTempoPlugin extends Plugin
 			due = true;
 		}
 		drainContainers(now, false);
+		addPickups(now);
 		if (milestonesDirty)
 		{
 			addMilestones(now);
@@ -957,6 +965,10 @@ public class XPTempoPlugin extends Plugin
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
+		if (event.getContainerId() == InventoryID.INV && initTicks == 0 && sessionId != null && config.uploadLoot())
+		{
+			pickups.inventory(inventoryCounts(event.getItemContainer()), client.getTickCount());
+		}
 		ContainerTracker.Kind kind = kindOf(event.getContainerId());
 		if (kind == null || initTicks != 0 || sessionId == null)
 		{
@@ -1195,14 +1207,14 @@ public class XPTempoPlugin extends Plugin
 	public void onNpcLootReceived(NpcLootReceived event)
 	{
 		NPC npc = event.getNpc();
-		addLoot(npc.getName(), "NPC", npc.getCombatLevel(), event.getItems());
+		addLoot(npc.getName(), "NPC", npc.getCombatLevel(), event.getItems(), true);
 	}
 
 	@Subscribe
 	public void onPlayerLootReceived(PlayerLootReceived event)
 	{
 		// Nothing about other players leaves the client: PvP loot is sent without the victim's name or level.
-		addLoot("Player kill", "PLAYER", 0, event.getItems());
+		addLoot("Player kill", "PLAYER", 0, event.getItems(), true);
 	}
 
 	@Subscribe
@@ -1214,10 +1226,11 @@ public class XPTempoPlugin extends Plugin
 		{
 			return;
 		}
-		addLoot(event.getName(), type, event.getCombatLevel(), event.getItems());
+		addLoot(event.getName(), type, event.getCombatLevel(), event.getItems(), false);
 	}
 
-	private void addLoot(String source, String sourceType, int combatLevel, Collection<ItemStack> items)
+	/** onFloor: the drop lands on the floor (kills), so whether it was picked up is worked out by the pickup tracker. */
+	private void addLoot(String source, String sourceType, int combatLevel, Collection<ItemStack> items, boolean onFloor)
 	{
 		if (initTicks != 0 || sessionId == null || !config.uploadLoot() || source == null || items == null || items.isEmpty())
 		{
@@ -1234,6 +1247,10 @@ public class XPTempoPlugin extends Plugin
 		{
 			rows.add(new int[]{e.getKey(), e.getValue()});
 		}
+		if (onFloor)
+		{
+			pickups.loot(Text.removeTags(source), sourceType, byId, client.getTickCount());
+		}
 		pendingEvents.add(event("loot", System.currentTimeMillis(),
 			"source", Text.removeTags(source),
 			"sourceType", sourceType,
@@ -1241,6 +1258,58 @@ public class XPTempoPlugin extends Plugin
 			"items", rows));
 		// Not urgent: drops ride the next regular upload (at most a minute), so fast kills or pickpocketing
 		// never turn into a request every few seconds.
+	}
+
+	@Subscribe
+	public void onItemSpawned(ItemSpawned event)
+	{
+		if (initTicks == 0 && sessionId != null && config.uploadLoot())
+		{
+			TileItem item = event.getItem();
+			pickups.spawned(event.getTile().getWorldLocation(), itemManager.canonicalize(item.getId()), item.getQuantity(), client.getTickCount());
+		}
+	}
+
+	@Subscribe
+	public void onItemDespawned(ItemDespawned event)
+	{
+		if (initTicks == 0 && sessionId != null && config.uploadLoot())
+		{
+			TileItem item = event.getItem();
+			pickups.despawned(event.getTile().getWorldLocation(), itemManager.canonicalize(item.getId()), item.getQuantity(), client.getTickCount());
+		}
+	}
+
+	private Map<Integer, Integer> inventoryCounts(ItemContainer container)
+	{
+		Map<Integer, Integer> counts = new HashMap<>();
+		if (container != null)
+		{
+			for (Item item : container.getItems())
+			{
+				if (item != null && item.getId() > 0 && item.getQuantity() > 0)
+				{
+					counts.merge(itemManager.canonicalize(item.getId()), item.getQuantity(), Integer::sum);
+				}
+			}
+		}
+		return counts;
+	}
+
+	/** Drops picked up off the floor, one event per source (sent with the next regular upload, like the drops). */
+	private void addPickups(long now)
+	{
+		Map<String, List<int[]>> bySource = new LinkedHashMap<>();
+		Map<String, String> types = new HashMap<>();
+		for (PickupTracker.Pickup p : pickups.tick(client.getTickCount()))
+		{
+			bySource.computeIfAbsent(p.source, k -> new ArrayList<>()).add(new int[]{p.itemId, p.quantity});
+			types.put(p.source, p.sourceType);
+		}
+		for (Map.Entry<String, List<int[]>> e : bySource.entrySet())
+		{
+			pendingEvents.add(event("pickup", now, "source", e.getKey(), "sourceType", types.get(e.getKey()), "items", e.getValue()));
+		}
 	}
 
 	@Subscribe
@@ -1491,6 +1560,7 @@ public class XPTempoPlugin extends Plugin
 		else if ("uploadLoot".equals(key) && !config.uploadLoot())
 		{
 			types.add("loot");
+			types.add("pickup");
 			types.add("kill_count");
 			types.add("counts");
 			types.add("clog_page");
@@ -1587,6 +1657,7 @@ public class XPTempoPlugin extends Plugin
 			}
 		}
 		// Current holdings and offers (the events for these were skipped during the init guard).
+		pickups.inventory(inventoryCounts(client.getItemContainer(InventoryID.INV)), client.getTickCount());
 		if (config.uploadInventory())
 		{
 			offerContainer(ContainerTracker.Kind.INVENTORY, client.getItemContainer(InventoryID.INV));
